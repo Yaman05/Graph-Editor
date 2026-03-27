@@ -1,3 +1,44 @@
+export const NODE_TYPE_COLORS = {
+  server:       "#22c55e",
+  database:     "#3b82f6",
+  api:          "#8b5cf6",
+  client:       "#64748b",
+  loadbalancer: "#f97316",
+  cache:        "#eab308",
+  queue:        "#ec4899",
+  firewall:     "#ef4444",
+  microservice: "#06b6d4",
+};
+
+export const NODE_TYPES = [
+  "server",
+  "database",
+  "api",
+  "client",
+  "loadbalancer",
+  "cache",
+  "queue",
+  "firewall",
+  "microservice",
+];
+
+export const NODE_TYPE_LABELS = {
+  server:       "Server",
+  database:     "Database",
+  api:          "API",
+  client:       "Client",
+  loadbalancer: "Load Balancer",
+  cache:        "Cache",
+  queue:        "Queue",
+  firewall:     "Firewall",
+  microservice: "Microservice",
+};
+
+export const FAILURE_COLORS = {
+  failed:   "#ef4444",
+  affected: "#f97316",
+};
+
 export const styles = {
   brandColor: "#6c63ff",
   input: {
@@ -29,6 +70,17 @@ export const styles = {
     borderRadius: 6,
     cursor: "pointer",
     fontWeight: 600,
+  },
+  btnDanger: {
+    background: "#ef4444",
+    color: "#fff",
+    border: "none",
+    padding: "8px 10px",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+    textAlign: "center",
+    fontSize: 14,
   },
   ghostBtn: {
     background: "transparent",
