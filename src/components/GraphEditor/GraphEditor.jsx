@@ -1,12 +1,11 @@
 // src/components/GraphEditor/GraphEditor.jsx
-// Network Topology Editor — visualize, analyze, and simulate failure propagation
-// in distributed system architectures.
+// Network Topology Editor — Mission Control aesthetic
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 
 import { useHistoryState } from "./utils/history";
-import { makeUniqueId, parseLinkQuery } from "./utils/helpers";
+import { makeUniqueId, parseLinkQuery, validateGraphData } from "./utils/helpers";
 import { dijkstra } from "./utils/dijkstra";
 import {
   bfs,
@@ -18,66 +17,41 @@ import {
   isConnected,
 } from "./utils/algorithms";
 import { computeHierarchyPositions, computeCircularPositions } from "./utils/layout";
-import { NODE_TYPE_COLORS, NODE_TYPES, FAILURE_COLORS } from "./styles";
+import { NODE_TYPE_COLORS, NODE_TYPES, FAILURE_COLORS, DS } from "./styles";
 
 import Modal from "./Modal";
 import Sidebar from "./Sidebar";
 import DrilldownPanel from "./DrilldownPanel";
+import ToastContainer from "./Toast";
+import { GraphEditorContext } from "./GraphEditorContext";
 
-// Default topology: a realistic web-service architecture
+// ── Default topology ──────────────────────────────────────────────────────────
 const DEFAULT_DATA = {
   nodes: [
-    {
-      id: "browser",
-      label: "Browser",
-      nodeType: "client",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "cdn",
-      label: "CDN",
-      nodeType: "server",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "lb",
-      label: "Load Balancer",
-      nodeType: "loadbalancer",
-      subGraph: {
+    { id: "browser",  label: "Browser",       nodeType: "client",       subGraph: { nodes: [], links: [] } },
+    { id: "firewall", label: "Firewall",       nodeType: "firewall",     subGraph: { nodes: [], links: [] } },
+    { id: "lb",       label: "Load Balancer",  nodeType: "loadbalancer", subGraph: {
         nodes: [
-          { id: "health", label: "Health Check", nodeType: "microservice" },
-          { id: "router", label: "Request Router", nodeType: "microservice" },
+          { id: "health", label: "Health Check",    nodeType: "microservice" },
+          { id: "router", label: "Request Router",  nodeType: "microservice" },
         ],
         links: [{ source: "health", target: "router", directed: true }],
       },
     },
-    {
-      id: "api1",
-      label: "API Server 1",
-      nodeType: "api",
-      subGraph: {
+    { id: "api1",     label: "API Server 1",   nodeType: "api", subGraph: {
         nodes: [
-          { id: "auth", label: "Auth", nodeType: "microservice" },
-          { id: "handler", label: "Handler", nodeType: "microservice" },
+          { id: "auth",      label: "Auth",      nodeType: "microservice" },
+          { id: "handler",   label: "Handler",   nodeType: "microservice" },
           { id: "validator", label: "Validator", nodeType: "microservice" },
         ],
         links: [
-          { source: "auth", target: "handler", directed: true },
+          { source: "auth",    target: "handler",   directed: true },
           { source: "handler", target: "validator", directed: true },
         ],
       },
     },
-    {
-      id: "api2",
-      label: "API Server 2",
-      nodeType: "api",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "postgres",
-      label: "PostgreSQL",
-      nodeType: "database",
-      subGraph: {
+    { id: "api2",     label: "API Server 2",   nodeType: "api",          subGraph: { nodes: [], links: [] } },
+    { id: "postgres", label: "PostgreSQL",      nodeType: "database",     subGraph: {
         nodes: [
           { id: "primary", label: "Primary", nodeType: "database" },
           { id: "replica", label: "Replica", nodeType: "database" },
@@ -85,110 +59,133 @@ const DEFAULT_DATA = {
         links: [{ source: "primary", target: "replica", directed: true }],
       },
     },
-    {
-      id: "redis",
-      label: "Redis Cache",
-      nodeType: "cache",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "queue",
-      label: "Message Queue",
-      nodeType: "queue",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "worker",
-      label: "Worker Service",
-      nodeType: "microservice",
-      subGraph: { nodes: [], links: [] },
-    },
-    {
-      id: "firewall",
-      label: "Firewall",
-      nodeType: "firewall",
-      subGraph: { nodes: [], links: [] },
-    },
+    { id: "redis",    label: "Redis Cache",     nodeType: "cache",        subGraph: { nodes: [], links: [] } },
+    { id: "queue",    label: "Message Queue",   nodeType: "queue",        subGraph: { nodes: [], links: [] } },
+    { id: "worker",   label: "Worker Service",  nodeType: "microservice", subGraph: { nodes: [], links: [] } },
   ],
   links: [
-    { source: "browser",  target: "firewall", directed: true,  weight: 1  },
-    { source: "firewall", target: "cdn",       directed: true,  weight: 2  },
-    { source: "firewall", target: "lb",        directed: true,  weight: 2  },
-    { source: "lb",       target: "api1",      directed: true,  weight: 3  },
-    { source: "lb",       target: "api2",      directed: true,  weight: 3  },
-    { source: "api1",     target: "postgres",  directed: true,  weight: 8  },
-    { source: "api2",     target: "postgres",  directed: true,  weight: 8  },
-    { source: "api1",     target: "redis",     directed: true,  weight: 2  },
-    { source: "api2",     target: "redis",     directed: true,  weight: 2  },
-    { source: "api1",     target: "queue",     directed: true,  weight: 4  },
-    { source: "queue",    target: "worker",    directed: true,  weight: 5  },
+    { source: "browser",  target: "firewall", directed: true, weight: 1  },
+    { source: "firewall", target: "lb",       directed: true, weight: 2  },
+    { source: "lb",       target: "api1",     directed: true, weight: 10 },
+    { source: "lb",       target: "api2",     directed: true, weight: 10 },
+    { source: "api1",     target: "postgres", directed: true, weight: 25 },
+    { source: "api2",     target: "postgres", directed: true, weight: 25 },
+    { source: "api1",     target: "redis",    directed: true, weight: 5  },
+    { source: "api2",     target: "redis",    directed: true, weight: 5  },
+    { source: "api1",     target: "queue",    directed: true, weight: 8  },
+    { source: "queue",    target: "worker",   directed: true, weight: 50 },
   ],
 };
 
-export default function GraphEditor() {
-  const svgRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const simRef = useRef(null);
+function getInitialData() {
+  try {
+    const saved = localStorage.getItem("graph_autosave");
+    if (saved) { const parsed = JSON.parse(saved); if (parsed.nodes && parsed.links) return parsed; }
+  } catch { /* ignore */ }
+  return DEFAULT_DATA;
+}
 
-  // Core graph state
-  const [data, updateData, historyCtrl] = useHistoryState(DEFAULT_DATA);
+export default function GraphEditor() {
+  const svgRef       = useRef(null);
+  const fileInputRef = useRef(null);
+  const simRef       = useRef(null);
+  const searchRef    = useRef(null);
+  const tooltipRef   = useRef(null);
+
+  // Core graph state (with undo history, auto-restored from localStorage)
+  const [data, updateData, historyCtrl] = useHistoryState(getInitialData());
+
+  // Auto-save to localStorage on data changes (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try { localStorage.setItem("graph_autosave", JSON.stringify(data)); } catch { /* ignore */ }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [data]);
 
   // UI state
-  const [selected, setSelected] = useState({ type: null, id: null });
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("");
-  const [modalConfig, setModalConfig] = useState(null);
-  const [layoutType, setLayoutType] = useState("NORMAL");
+  const [selected,      setSelected]      = useState({ type: null, id: null });
+  const [search,        setSearch]        = useState("");
+  const [filter,        setFilter]        = useState("");
+  const [modalConfig,   setModalConfig]   = useState(null);
+  const [layoutType,    setLayoutType]    = useState("NORMAL");
   const [hierDirection, setHierDirection] = useState("TB");
 
-  // Analysis (degree / pagerank)
-  const [analysis, setAnalysis] = useState(null);
-
-  // Algorithm results (BFS / DFS / topological / MST)
+  // Analysis
+  const [analysis,        setAnalysis]        = useState(null);
   const [algorithmResult, setAlgorithmResult] = useState(null);
-
-  // Shortest path
-  const [shortestPath, setShortestPath] = useState([]);
+  const [shortestPath,    setShortestPath]    = useState([]);
 
   // Failure simulation
-  const [failureMode, setFailureMode] = useState(false);
-  const [failedNodes, setFailedNodes] = useState(new Set());
+  const [failureMode,   setFailureMode]   = useState(false);
+  const [failedNodes,   setFailedNodes]   = useState(new Set());
   const [affectedNodes, setAffectedNodes] = useState(new Set());
 
-  // Drill-down panel
+  // Drill-down
   const [drilldownNodeId, setDrilldownNodeId] = useState(null);
+
+  // Right-click context menu
+  const [ctxMenu, setCtxMenu] = useState(null); // { x, y, nodeId } or null
+
+  // Pin Layout mode — nodes stay exactly where dragged (draw.io-style)
+  const [pinMode, setPinMode] = useState(false);
+  const pinModeRef = useRef(false);
+  useEffect(() => { pinModeRef.current = pinMode; }, [pinMode]);
+
+  // Toast notifications
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
+  const addToast = useCallback((message, type = "info") => {
+    const id = ++toastIdRef.current;
+    setToasts((t) => [...t, { id, message, type }]);
+  }, []);
+  const removeToast = useCallback((id) => {
+    setToasts((t) => t.filter((x) => x.id !== id));
+  }, []);
 
   // Versions (localStorage)
   const [versions, setVersions] = useState(() => {
-    try {
-      const raw = localStorage.getItem("graph_versions");
-      return raw ? JSON.parse(raw) : {};
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(localStorage.getItem("graph_versions") || "{}"); }
+    catch { return {}; }
   });
 
-  // Derived graph statistics
+  // Graph statistics
   const graphStats = useMemo(() => {
     const n = data.nodes.length;
     const e = data.links.length;
     const maxEdges = n > 1 ? n * (n - 1) : 1;
     return {
-      nodes: n,
-      links: e,
-      density: maxEdges > 0 ? (e / maxEdges).toFixed(3) : "0",
+      nodes:     n,
+      links:     e,
+      density:   maxEdges > 0 ? (e / maxEdges).toFixed(3) : "0",
       connected: isConnected(data.nodes, data.links),
       hasCycles: detectCycles(data.nodes, data.links),
     };
   }, [data]);
 
+  // ── Keyboard shortcuts ──────────────────────────────────────────────────
+  useEffect(() => {
+    function handleKeyDown(e) {
+      // Don't intercept when typing in inputs/textareas
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); historyCtrl.undo(); return; }
+      if (mod && e.key === "z" && e.shiftKey)  { e.preventDefault(); historyCtrl.redo(); return; }
+      if (e.key === "Escape") { setSelected({ type: null, id: null }); setShortestPath([]); setCtxMenu(null); return; }
+      if ((e.key === "Delete" || e.key === "Backspace") && selected.type) { e.preventDefault(); openDeleteSelectedModal(); return; }
+      if (e.key === "/" && !mod) { e.preventDefault(); searchRef.current?.focus(); return; }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [historyCtrl, selected]);
+
   function saveVersions(v) {
     setVersions(v);
-    try {
-      localStorage.setItem("graph_versions", JSON.stringify(v));
-    } catch (e) {
-      console.warn("Failed to save versions to localStorage", e);
-    }
+    try { localStorage.setItem("graph_versions", JSON.stringify(v)); }
+    catch (err) { console.warn("localStorage write failed", err); }
   }
 
   function applyChange(mutator) {
@@ -206,127 +203,152 @@ export default function GraphEditor() {
     setAffectedNodes(new Set());
   }
 
-  /* -------------------------
-     D3 Rendering
-     ------------------------- */
+  // ── D3 canvas rendering ──────────────────────────────────────────────────
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
-    const svg = d3.select(svgEl);
-    const rect = svgEl.getBoundingClientRect();
-    const width = rect.width || window.innerWidth;
+
+    const svg    = d3.select(svgEl);
+    const rect   = svgEl.getBoundingClientRect();
+    const width  = rect.width  || window.innerWidth  - 300;
     const height = rect.height || window.innerHeight;
 
     svg.selectAll("*").remove();
+
+    // Dot-grid background rect (rendered behind everything)
+    const defs = svg.append("defs");
+
+    defs.append("pattern")
+      .attr("id", "dot-grid")
+      .attr("x", 0).attr("y", 0)
+      .attr("width", 20).attr("height", 20)
+      .attr("patternUnits", "userSpaceOnUse")
+      .append("circle")
+        .attr("cx", 10).attr("cy", 10).attr("r", 0.8)
+        .attr("fill", "rgba(148,163,184,0.25)");
+
+    svg.append("rect")
+      .attr("width", "100%").attr("height", "100%")
+      .attr("fill", "url(#dot-grid)");
+
+    // Arrowheads
+    defs.append("marker")
+      .attr("id", "arrowhead")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 24).attr("refY", 0)
+      .attr("markerWidth", 6).attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", DS.accent);
+
+    defs.append("marker")
+      .attr("id", "arrowhead-fail")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 24).attr("refY", 0)
+      .attr("markerWidth", 6).attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", FAILURE_COLORS.failed);
+
+    defs.append("marker")
+      .attr("id", "arrowhead-warn")
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 24).attr("refY", 0)
+      .attr("markerWidth", 6).attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", DS.gold);
+
     const container = svg.append("g").attr("class", "container");
     svg.call(
-      d3.zoom()
-        .scaleExtent([0.1, 4])
+      d3.zoom().scaleExtent([0.1, 4])
         .on("zoom", (e) => container.attr("transform", e.transform))
     );
 
-    // Arrowhead marker
-    const defs = svg.append("defs");
-    defs
-      .append("marker")
-      .attr("id", "arrowhead")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 22)
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-5L10,0L0,5")
-      .attr("fill", "#6c63ff");
-
-    // Failure mode arrowhead (red)
-    defs
-      .append("marker")
-      .attr("id", "arrowhead-fail")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 22)
-      .attr("refY", 0)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path")
-      .attr("d", "M0,-5L10,0L0,5")
-      .attr("fill", FAILURE_COLORS.failed);
-
-    const filterIds = filter
-      ? filter.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
-    const visibleNodes = filterIds.length
-      ? data.nodes.filter((n) => filterIds.includes(n.id))
-      : data.nodes;
+    // Filter
+    const filterIds    = filter ? filter.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    const visibleNodes = filterIds.length ? data.nodes.filter((n) => filterIds.includes(n.id)) : data.nodes;
     const visibleLinks = filterIds.length
-      ? data.links.filter(
-          (l) => filterIds.includes(l.source) && filterIds.includes(l.target)
-        )
+      ? data.links.filter((l) => filterIds.includes(l.source) && filterIds.includes(l.target))
       : data.links;
 
     const nodesCopy = visibleNodes.map((n) => ({ ...n }));
     const linksCopy = visibleLinks.map((l) => ({ ...l }));
 
-    let usingSimulation = true;
+    let usingSimulation = false;
 
     if (layoutType === "HIERARCHICAL") {
-      const positions = computeHierarchyPositions(
-        nodesCopy,
-        linksCopy,
-        hierDirection,
-        width,
-        height
-      );
-      nodesCopy.forEach((n) => {
-        const pos = positions.get(n.id);
-        n.x = pos?.x ?? width / 2;
-        n.y = pos?.y ?? height / 2;
-        n.fx = n.x;
-        n.fy = n.y;
-      });
-      usingSimulation = false;
+      const pos = computeHierarchyPositions(nodesCopy, linksCopy, hierDirection, width, height);
+      nodesCopy.forEach((n) => { const p = pos.get(n.id); n.x = p?.x ?? width/2; n.y = p?.y ?? height/2; n.fx = n.x; n.fy = n.y; });
       simRef.current?.stop();
     } else if (layoutType === "CIRCULAR") {
-      const positions = computeCircularPositions(nodesCopy, width, height);
-      nodesCopy.forEach((n) => {
-        const pos = positions.get(n.id);
-        n.x = pos?.x ?? width / 2;
-        n.y = pos?.y ?? height / 2;
-        n.fx = n.x;
-        n.fy = n.y;
-      });
-      usingSimulation = false;
+      const pos = computeCircularPositions(nodesCopy, width, height);
+      nodesCopy.forEach((n) => { const p = pos.get(n.id); n.x = p?.x ?? width/2; n.y = p?.y ?? height/2; n.fx = n.x; n.fy = n.y; });
       simRef.current?.stop();
     } else {
-      const simulation = d3
-        .forceSimulation(nodesCopy)
-        .force(
-          "link",
-          d3.forceLink(linksCopy).id((d) => d.id).distance(100)
-        )
-        .force("charge", d3.forceManyBody().strength(-280))
+      usingSimulation = true;
+      const sim = d3.forceSimulation(nodesCopy)
+        .force("link",   d3.forceLink(linksCopy).id((d) => d.id).distance(120))
+        .force("charge", d3.forceManyBody().strength(-320))
         .force("center", d3.forceCenter(width / 2, height / 2))
         .on("tick", ticked);
-      simRef.current = simulation;
-      usingSimulation = true;
+      simRef.current = sim;
     }
 
     const linkGroup = container.append("g").attr("class", "links");
     const nodeGroup = container.append("g").attr("class", "nodes");
 
-    const linkQuery = parseLinkQuery(search);
+    const linkQuery  = parseLinkQuery(search);
     const nodeSearch = search && !linkQuery ? search.toLowerCase() : null;
 
-    // --- Links ---
-    const linkSel = linkGroup
-      .selectAll("line")
-      .data(linksCopy)
-      .join("line")
-      .attr("stroke-width", 2)
-      .attr("stroke-opacity", 0.7)
+    // ─ Links ─────────────────────────────────────────────────────────────
+    function getLinkArrow(d) {
+      const src = typeof d.source === "object" ? d.source.id : d.source;
+      const showArrow = layoutType === "HIERARCHICAL" || (layoutType === "NORMAL" && d.directed);
+      if (!showArrow) return null;
+      if (failedNodes.has(src)) return "url(#arrowhead-fail)";
+      const tgt = typeof d.target === "object" ? d.target.id : d.target;
+      const inPath = shortestPath.some((_, i) =>
+        i < shortestPath.length - 1 && shortestPath[i] === src && shortestPath[i+1] === tgt
+      );
+      if (inPath) return "url(#arrowhead-warn)";
+      return "url(#arrowhead)";
+    }
+
+    function getLinkColor(d) {
+      const src = typeof d.source === "object" ? d.source.id : d.source;
+      const tgt = typeof d.target === "object" ? d.target.id : d.target;
+
+      if (algorithmResult?.type === "mst") {
+        const isMst = algorithmResult.edges.some((e) => {
+          const es = typeof e.source === "object" ? e.source.id : e.source;
+          const et = typeof e.target === "object" ? e.target.id : e.target;
+          return (es === src && et === tgt) || (es === tgt && et === src);
+        });
+        return isMst ? DS.accent : "rgba(255,255,255,0.06)";
+      }
+
+      if (failedNodes.has(src) || failedNodes.has(tgt)) return FAILURE_COLORS.failed;
+      if (affectedNodes.has(src) || affectedNodes.has(tgt)) return FAILURE_COLORS.affected;
+
+      const isSel = selected.type === "link" && selected.id?.source === src && selected.id?.target === tgt;
+      const isSearched = linkQuery && ((linkQuery[0]===src && linkQuery[1]===tgt)||(linkQuery[0]===tgt && linkQuery[1]===src));
+
+      let inPath = false;
+      for (let i = 0; i < shortestPath.length - 1; i++) {
+        const a = shortestPath[i], b = shortestPath[i+1];
+        if ((a===src && b===tgt)||(a===tgt && b===src)) { inPath = true; break; }
+      }
+
+      if (inPath)      return DS.gold;
+      if (isSel)       return DS.accent;
+      if (isSearched)  return DS.gold;
+      return "rgba(148,163,184,0.35)";
+    }
+
+    const linkSel = linkGroup.selectAll("line").data(linksCopy).join("line")
+      .attr("stroke-width", 1.5)
+      .attr("stroke-opacity", 0.85)
       .style("cursor", "pointer")
+      .attr("stroke", getLinkColor)
+      .attr("marker-end", getLinkArrow)
       .on("click", (e, d) => {
         e.stopPropagation();
         if (failureMode) return;
@@ -335,207 +357,178 @@ export default function GraphEditor() {
         setSelected({ type: "link", id: { source: src, target: tgt } });
       });
 
-    function getLinkColor(d) {
-      const src = typeof d.source === "object" ? d.source.id : d.source;
-      const tgt = typeof d.target === "object" ? d.target.id : d.target;
-
-      // MST mode: dim non-MST edges
-      if (algorithmResult?.type === "mst") {
-        const isMst = algorithmResult.edges.some((e) => {
-          const es = typeof e.source === "object" ? e.source.id : e.source;
-          const et = typeof e.target === "object" ? e.target.id : e.target;
-          return (es === src && et === tgt) || (es === tgt && et === src);
-        });
-        return isMst ? "#ffd166" : "#1e1e2e";
-      }
-
-      // Failure propagation coloring
-      const srcFailed = failedNodes.has(src);
-      const tgtFailed = failedNodes.has(tgt);
-      const srcAffected = affectedNodes.has(src);
-      const tgtAffected = affectedNodes.has(tgt);
-      if (srcFailed || tgtFailed) return FAILURE_COLORS.failed;
-      if (srcAffected || tgtAffected) return FAILURE_COLORS.affected;
-
-      const isSel =
-        selected.type === "link" &&
-        selected.id?.source === src &&
-        selected.id?.target === tgt;
-      const isSearched =
-        linkQuery &&
-        ((linkQuery[0] === src && linkQuery[1] === tgt) ||
-          (linkQuery[0] === tgt && linkQuery[1] === src));
-      let inPath = false;
-      for (let i = 0; i < shortestPath.length - 1; i++) {
-        const a = shortestPath[i],
-          b = shortestPath[i + 1];
-        if ((a === src && b === tgt) || (a === tgt && b === src)) {
-          inPath = true;
-          break;
-        }
-      }
-      if (inPath) return "#ffd166";
-      if (isSel) return "#ff7b00";
-      if (isSearched) return "#00eaff";
-      return "#6c63ff";
-    }
-
-    linkSel
-      .attr("stroke", getLinkColor)
-      .attr("marker-end", (d) => {
-        const src = typeof d.source === "object" ? d.source.id : d.source;
-        const showArrow =
-          layoutType === "HIERARCHICAL" ||
-          (layoutType === "NORMAL" && d.directed);
-        if (!showArrow) return null;
-        if (failedNodes.has(src)) return "url(#arrowhead-fail)";
-        return "url(#arrowhead)";
-      });
-
     // Weight labels
-    const weightLabels = linkGroup
-      .selectAll("text")
-      .data(linksCopy)
-      .join("text")
-      .attr("fill", "#cfcfe0")
-      .attr("font-size", 10)
+    const weightLabels = linkGroup.selectAll("text").data(linksCopy).join("text")
+      .attr("fill", DS.textMuted)
+      .attr("font-size", 9)
+      .attr("font-family", "'JetBrains Mono', monospace")
       .attr("text-anchor", "middle")
-      .text((d) => (d.weight == null ? "" : d.weight));
+      .style("pointer-events", "none")
+      .text((d) => d.weight == null ? "" : d.weight);
 
-    // --- Nodes ---
+    // ─ Nodes ─────────────────────────────────────────────────────────────
     let colorScale = null;
     if (analysis?.values) {
-      const values = Object.values(analysis.values);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      colorScale = d3
-        .scaleLinear()
-        .domain([min, max])
-        .range(["#6c63ff", "#ffd166"]);
+      const vals = Object.values(analysis.values);
+      colorScale = d3.scaleLinear()
+        .domain([Math.min(...vals), Math.max(...vals)])
+        .range([DS.bgCard, DS.accent]);
     }
 
     function getNodeFill(d) {
-      // Priority 1: failure simulation
-      if (failedNodes.has(d.id)) return FAILURE_COLORS.failed;
+      if (failedNodes.has(d.id))   return FAILURE_COLORS.failed;
       if (affectedNodes.has(d.id)) return FAILURE_COLORS.affected;
 
-      // Priority 2: algorithm traversal (BFS/DFS)
-      if (
-        algorithmResult?.type === "bfs" ||
-        algorithmResult?.type === "dfs"
-      ) {
+      if (algorithmResult?.type === "bfs" || algorithmResult?.type === "dfs") {
         if (algorithmResult.visited.has(d.id)) {
           const idx = algorithmResult.order.indexOf(d.id);
-          const t = idx / Math.max(1, algorithmResult.order.length - 1);
-          return d3.interpolate("#00eaff", "#6c63ff")(t);
+          const t   = idx / Math.max(1, algorithmResult.order.length - 1);
+          return d3.interpolate(NODE_TYPE_COLORS[d.nodeType] || DS.bgCard, DS.accent)(t);
         }
       }
-      // Topological sort: color by order index
+
       if (algorithmResult?.type === "topological") {
         const idx = algorithmResult.order.indexOf(d.id);
         if (idx !== -1) {
           const t = idx / Math.max(1, algorithmResult.order.length - 1);
-          return d3.interpolate("#6c63ff", "#ffd166")(t);
+          return d3.interpolate("#7c5cbf", DS.gold)(t);
         }
       }
 
-      // Priority 3: existing analysis (degree/pagerank)
-      if (analysis?.values && colorScale) {
-        return colorScale(analysis.values[d.id] ?? 0);
-      }
+      if (analysis?.values && colorScale) return colorScale(analysis.values[d.id] ?? 0);
+      if (shortestPath.includes(d.id))     return DS.gold;
+      if (selected.type === "node" && selected.id === d.id) return DS.accent;
+      if (nodeSearch && d.label.toLowerCase().includes(nodeSearch)) return DS.gold;
 
-      // Priority 4: shortest path
-      if (shortestPath.includes(d.id)) return "#ffd166";
-
-      // Priority 5: selected / search
-      if (selected.type === "node" && selected.id === d.id) return "#ff7b00";
-      if (nodeSearch && d.label.toLowerCase().includes(nodeSearch))
-        return "#00eaff";
-
-      // Priority 6: node type color
-      return NODE_TYPE_COLORS[d.nodeType] || "#2f2f37";
+      return NODE_TYPE_COLORS[d.nodeType] || DS.bgCard;
     }
 
-    const node = nodeGroup
-      .selectAll("g")
-      .data(nodesCopy, (d) => d.id)
+    function getNodeStroke(d) {
+      if (failedNodes.has(d.id))   return FAILURE_COLORS.failed;
+      if (affectedNodes.has(d.id)) return FAILURE_COLORS.affected;
+      if (selected.type === "node" && selected.id === d.id) return DS.accent;
+      if (d.subGraph?.nodes?.length > 0) return DS.accent;
+      return `${NODE_TYPE_COLORS[d.nodeType]}88` || "rgba(255,255,255,0.15)";
+    }
+
+    function getNodeR(d) {
+      return Math.max(20, 16 + (d.label?.length || 0) * 1.2);
+    }
+
+    const node = nodeGroup.selectAll("g").data(nodesCopy, (d) => d.id)
       .join((enter) => {
         const g = enter.append("g");
-        g.append("circle").attr("r", (d) =>
-          Math.max(18, 14 + (d.label?.length || 0) * 1.5)
-        );
+        g.append("circle");
         g.append("text")
-          .attr("y", 5)
+          .attr("y", 4)
           .attr("text-anchor", "middle")
-          .attr("fill", "#f5f5f7")
+          .attr("fill", DS.textPrimary)
           .style("pointer-events", "none")
-          .style("font-size", 11)
+          .style("font-size", "10px")
+          .style("font-family", "'JetBrains Mono', monospace")
           .style("font-weight", "600");
         return g;
       });
 
-    node
-      .select("circle")
-      .attr("fill", getNodeFill)
-      .attr("stroke", (d) => {
-        if (failedNodes.has(d.id)) return "#ff0000";
-        if (affectedNodes.has(d.id)) return "#f97316";
-        if (d.subGraph?.nodes?.length > 0) return "#00eaff"; // has sub-graph indicator
-        return "#6c63ff";
-      })
+    node.select("circle")
+      .attr("r",            getNodeR)
+      .attr("fill",         getNodeFill)
+      .attr("stroke",       getNodeStroke)
       .attr("stroke-width", (d) => {
-        if (failedNodes.has(d.id) || affectedNodes.has(d.id)) return 3;
-        if (d.subGraph?.nodes?.length > 0) return 2.5;
-        return 1.5;
+        if (failedNodes.has(d.id) || affectedNodes.has(d.id)) return 2.5;
+        if (selected.type === "node" && selected.id === d.id) return 2;
+        if (d.subGraph?.nodes?.length > 0) return 1.5;
+        return 1;
       })
       .attr("stroke-dasharray", (d) =>
         d.subGraph?.nodes?.length > 0 && !failedNodes.has(d.id) ? "5,3" : null
       )
+      .style("filter", (d) => {
+        const color = NODE_TYPE_COLORS[d.nodeType];
+        if (selected.type === "node" && selected.id === d.id) return `drop-shadow(0 0 8px ${DS.accent})`;
+        if (failedNodes.has(d.id))   return `drop-shadow(0 0 8px ${FAILURE_COLORS.failed})`;
+        if (affectedNodes.has(d.id)) return `drop-shadow(0 0 6px ${FAILURE_COLORS.affected})`;
+        return color ? `drop-shadow(0 0 3px ${color}55)` : null;
+      })
       .style("cursor", failureMode ? "crosshair" : "pointer")
+      .style("animation", (d) =>
+        affectedNodes.has(d.id) ? "pulse-fail 2s ease-in-out infinite" : null
+      )
       .on("click", (e, d) => {
         e.stopPropagation();
         if (failureMode) {
-          // Toggle failed state
-          const newFailed = new Set(failedNodes);
-          if (newFailed.has(d.id)) {
-            newFailed.delete(d.id);
-          } else {
-            newFailed.add(d.id);
-          }
-          setFailedNodes(newFailed);
-          setAffectedNodes(
-            computeFailurePropagation(data.nodes, data.links, newFailed)
-          );
+          const next = new Set(failedNodes);
+          next.has(d.id) ? next.delete(d.id) : next.add(d.id);
+          setFailedNodes(next);
+          setAffectedNodes(computeFailurePropagation(data.nodes, data.links, next));
           return;
         }
         setSelected({ type: "node", id: d.id });
       })
+      .on("contextmenu", function(e, d) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (failureMode) return;
+        setSelected({ type: "node", id: d.id });
+        const rect = svgRef.current.getBoundingClientRect();
+        setCtxMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top, nodeId: d.id });
+        // Hide tooltip when context menu opens
+        const tip = tooltipRef.current;
+        if (tip) tip.style.opacity = "0";
+      })
+      .on("mouseover", function(e, d) {
+        if (selected.id === d.id) return;
+        const r = getNodeR(d);
+        d3.select(this).transition().duration(120)
+          .attr("r", r * 1.08)
+          .style("filter", `drop-shadow(0 0 8px ${NODE_TYPE_COLORS[d.nodeType] || DS.accent})`);
+        // Show tooltip
+        const tip = tooltipRef.current;
+        if (tip) {
+          const degree = data.links.filter((l) => l.source === d.id || l.target === d.id).length;
+          const subCount = d.subGraph?.nodes?.length || 0;
+          tip.innerHTML = `<strong>${d.label}</strong><br/>ID: ${d.id}<br/>Type: ${d.nodeType}<br/>Links: ${degree}${subCount ? `<br/>Sub-components: ${subCount}` : ""}`;
+          tip.style.opacity = "1";
+          const rect = svgRef.current.getBoundingClientRect();
+          tip.style.left = `${e.clientX - rect.left + 14}px`;
+          tip.style.top = `${e.clientY - rect.top - 10}px`;
+        }
+      })
+      .on("mousemove", function(e) {
+        const tip = tooltipRef.current;
+        if (tip) {
+          const rect = svgRef.current.getBoundingClientRect();
+          tip.style.left = `${e.clientX - rect.left + 14}px`;
+          tip.style.top = `${e.clientY - rect.top - 10}px`;
+        }
+      })
+      .on("mouseout", function(_, d) {
+        if (selected.id === d.id) return;
+        d3.select(this).transition().duration(120)
+          .attr("r", getNodeR(d))
+          .style("filter", (dd) => {
+            const color = NODE_TYPE_COLORS[dd.nodeType];
+            return color ? `drop-shadow(0 0 3px ${color}55)` : null;
+          });
+        const tip = tooltipRef.current;
+        if (tip) tip.style.opacity = "0";
+      })
       .call(
-        d3
-          .drag()
+        d3.drag()
           .on("start", (e, d) => {
-            if (usingSimulation && simRef.current && !e.active)
-              simRef.current.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
+            // Reheat simulation so links follow while dragging
+            if (usingSimulation && simRef.current && !e.active) simRef.current.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
           })
           .on("drag", (e, d) => {
-            d.fx = e.x;
-            d.fy = e.y;
-            if (!usingSimulation) ticked();
+            d.fx = e.x; d.fy = e.y;
+            ticked(); // Always update DOM immediately — eliminates cursor lag
           })
           .on("end", (e, d) => {
-            if (usingSimulation && simRef.current && !e.active)
-              simRef.current.alphaTarget(0);
-            if (
-              layoutType === "HIERARCHICAL" ||
-              layoutType === "CIRCULAR"
-            ) {
-              // keep fixed in non-force layouts
-            } else {
-              d.fx = null;
-              d.fy = null;
-            }
+            if (usingSimulation && simRef.current && !e.active) simRef.current.alphaTarget(0);
+            // Pin mode: keep node fixed where it was dropped
+            // Normal mode: release node back to simulation physics
+            if (layoutType === "NORMAL" && !pinModeRef.current) { d.fx = null; d.fy = null; }
           })
       );
 
@@ -543,105 +536,74 @@ export default function GraphEditor() {
 
     // Analysis value labels
     if (analysis?.values) {
-      node
-        .append("text")
-        .attr("y", -24)
+      node.append("text")
+        .attr("y", -getNodeR(node.datum ? node.datum() : { label: "" }) - 6)
+        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
         .attr("text-anchor", "middle")
-        .attr("fill", "#cfcfe0")
-        .style("font-size", 10)
+        .attr("fill", DS.textSecond)
+        .style("font-size", "9px")
+        .style("font-family", "'JetBrains Mono', monospace")
         .style("pointer-events", "none")
-        .text((d) => {
-          const v = analysis.values[d.id];
-          return v != null ? Number(v).toFixed(2) : "";
-        });
+        .text((d) => { const v = analysis.values[d.id]; return v != null ? Number(v).toFixed(2) : ""; });
     }
 
-    // Algorithm order labels (topological / BFS / DFS)
+    // Algorithm order labels
     if (algorithmResult?.order) {
-      node
-        .append("text")
-        .attr("y", -24)
+      node.append("text")
+        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
         .attr("text-anchor", "middle")
-        .attr("fill", "#ffd166")
-        .style("font-size", 10)
+        .attr("fill", DS.gold)
+        .style("font-size", "9px")
+        .style("font-family", "'JetBrains Mono', monospace")
+        .style("font-weight", "700")
         .style("pointer-events", "none")
-        .text((d) => {
-          const idx = algorithmResult.order.indexOf(d.id);
-          return idx !== -1 ? `#${idx + 1}` : "";
-        });
+        .text((d) => { const idx = algorithmResult.order.indexOf(d.id); return idx !== -1 ? `#${idx+1}` : ""; });
     }
 
-    // Failure mode: show "FAILED" / "AFFECTED" label
+    // Failure labels
     if (failureMode) {
-      node
-        .filter((d) => failedNodes.has(d.id))
+      node.filter((d) => failedNodes.has(d.id))
         .append("text")
-        .attr("y", -26)
+        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", FAILURE_COLORS.failed)
-        .style("font-size", 9)
+        .style("font-size", "8px")
         .style("font-weight", "700")
+        .style("font-family", "'JetBrains Mono', monospace")
         .style("pointer-events", "none")
         .text("FAILED");
 
-      node
-        .filter((d) => affectedNodes.has(d.id))
+      node.filter((d) => affectedNodes.has(d.id))
         .append("text")
-        .attr("y", -26)
+        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", FAILURE_COLORS.affected)
-        .style("font-size", 9)
+        .style("font-size", "8px")
         .style("font-weight", "700")
+        .style("font-family", "'JetBrains Mono', monospace")
         .style("pointer-events", "none")
         .text("AFFECTED");
     }
 
     function ticked() {
+      function nodeX(d, field) {
+        const ref = typeof d[field] === "object" ? d[field].x : nodesCopy.find((n) => n.id === d[field])?.x ?? 0;
+        return ref;
+      }
+      function nodeY(d, field) {
+        const ref = typeof d[field] === "object" ? d[field].y : nodesCopy.find((n) => n.id === d[field])?.y ?? 0;
+        return ref;
+      }
+
       linkSel
-        .attr("x1", (d) =>
-          typeof d.source === "object"
-            ? d.source.x
-            : nodesCopy.find((n) => n.id === d.source)?.x
-        )
-        .attr("y1", (d) =>
-          typeof d.source === "object"
-            ? d.source.y
-            : nodesCopy.find((n) => n.id === d.source)?.y
-        )
-        .attr("x2", (d) =>
-          typeof d.target === "object"
-            ? d.target.x
-            : nodesCopy.find((n) => n.id === d.target)?.x
-        )
-        .attr("y2", (d) =>
-          typeof d.target === "object"
-            ? d.target.y
-            : nodesCopy.find((n) => n.id === d.target)?.y
-        );
+        .attr("x1", (d) => nodeX(d, "source"))
+        .attr("y1", (d) => nodeY(d, "source"))
+        .attr("x2", (d) => nodeX(d, "target"))
+        .attr("y2", (d) => nodeY(d, "target"));
 
       weightLabels
-        .attr("x", (d) => {
-          const sx =
-            typeof d.source === "object"
-              ? d.source.x
-              : nodesCopy.find((n) => n.id === d.source)?.x ?? 0;
-          const tx =
-            typeof d.target === "object"
-              ? d.target.x
-              : nodesCopy.find((n) => n.id === d.target)?.x ?? 0;
-          return (sx + tx) / 2;
-        })
-        .attr("y", (d) => {
-          const sy =
-            typeof d.source === "object"
-              ? d.source.y
-              : nodesCopy.find((n) => n.id === d.source)?.y ?? 0;
-          const ty =
-            typeof d.target === "object"
-              ? d.target.y
-              : nodesCopy.find((n) => n.id === d.target)?.y ?? 0;
-          return (sy + ty) / 2 - 8;
-        });
+        .attr("x", (d) => (nodeX(d, "source") + nodeX(d, "target")) / 2)
+        .attr("y", (d) => (nodeY(d, "source") + nodeY(d, "target")) / 2 - 7);
 
       node.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
     }
@@ -649,6 +611,7 @@ export default function GraphEditor() {
     if (!usingSimulation) ticked();
 
     svg.on("click", () => {
+      setCtxMenu(null);
       if (!failureMode) {
         setSelected({ type: null, id: null });
         setShortestPath([]);
@@ -656,76 +619,29 @@ export default function GraphEditor() {
     });
 
     return () => {
-      try {
-        simRef.current?.stop();
-        simRef.current = null;
-      } catch {}
+      try { simRef.current?.stop(); simRef.current = null; } catch { /* ok */ }
     };
   }, [
-    data,
-    search,
-    filter,
-    selected,
-    shortestPath,
-    layoutType,
-    hierDirection,
-    analysis,
-    algorithmResult,
-    failureMode,
-    failedNodes,
-    affectedNodes,
+    data, search, filter, selected, shortestPath,
+    layoutType, hierDirection, analysis, algorithmResult,
+    failureMode, failedNodes, affectedNodes,
   ]);
 
-  /* -------------------------
-     Modal helpers
-     ------------------------- */
+  // ── Modal helpers ─────────────────────────────────────────────────────────
   function openAddNodeModal() {
     setModalConfig({
       title: "Add Node",
       fields: [
-        {
-          name: "label",
-          label: "Label",
-          defaultValue: "",
-          placeholder: "e.g., API Gateway",
-          autoFocus: true,
-        },
-        {
-          name: "nodeType",
-          label: "Node Type",
-          defaultValue: "server",
-          options: NODE_TYPES,
-        },
+        { name: "label",    label: "Label",     defaultValue: "", placeholder: "e.g., API Gateway", autoFocus: true },
+        { name: "nodeType", label: "Node Type", defaultValue: "server", options: NODE_TYPES },
       ],
       onSubmit: ({ label, nodeType }) => {
         if (!label.trim()) return setModalConfig(null);
-
-        // Validate: warn on duplicate label
-        const duplicate = data.nodes.some(
-          (n) => n.label.trim().toLowerCase() === label.trim().toLowerCase()
-        );
-        if (duplicate) {
-          const proceed = window.confirm(
-            `A node named "${label}" already exists. Add anyway?`
-          );
-          if (!proceed) return setModalConfig(null);
-        }
-
+        const dup = data.nodes.some((n) => n.label.toLowerCase() === label.trim().toLowerCase());
+        if (dup && !window.confirm(`A node named "${label}" already exists. Add anyway?`)) return setModalConfig(null);
         applyChange((d) => {
-          const idBase = label.replace(/\s+/g, "_").toLowerCase() || "node";
-          const id = makeUniqueId(idBase, d.nodes);
-          return {
-            nodes: [
-              ...d.nodes,
-              {
-                id,
-                label: label.trim(),
-                nodeType: nodeType || "server",
-                subGraph: { nodes: [], links: [] },
-              },
-            ],
-            links: d.links,
-          };
+          const id = makeUniqueId(label.replace(/\s+/g, "_").toLowerCase() || "node", d.nodes);
+          return { nodes: [...d.nodes, { id, label: label.trim(), nodeType: nodeType || "server", subGraph: { nodes: [], links: [] } }], links: d.links };
         });
         setModalConfig(null);
       },
@@ -733,128 +649,50 @@ export default function GraphEditor() {
   }
 
   function openAddLinkModal() {
-    if (selected.type !== "node") return alert("Select a source node first.");
-    const selectedNode = selected.id;
-    const hierarchical = layoutType === "HIERARCHICAL";
-    const isNormal = layoutType === "NORMAL";
-
+    if (selected.type !== "node") return addToast("Select a source node first.", "warning");
+    const src   = selected.id;
+    const isHier = layoutType === "HIERARCHICAL";
+    const isNorm = layoutType === "NORMAL";
     setModalConfig({
-      title: hierarchical
-        ? `Add Link (selected = ${selectedNode}, relation Parent/Child)`
-        : `Add Link from "${selectedNode}"`,
+      title: isHier ? `Add Link (hierarchical) from "${src}"` : `Add Link from "${src}"`,
       fields: [
-        hierarchical
-          ? {
-              name: "relation",
-              label: "Relation",
-              defaultValue: "parent→child",
-              options: ["parent→child", "child→parent"],
-            }
-          : {
-              name: "direction",
-              label: "Direction",
-              defaultValue: "outgoing",
-              options: ["outgoing", "incoming"],
-            },
-        {
-          name: "other",
-          label: "Other node id",
-          defaultValue: "",
-          placeholder: "Existing node id",
-        },
-        {
-          name: "weight",
-          label: "Weight (optional)",
-          defaultValue: "",
-          placeholder: "Number or leave blank",
-        },
-        ...(isNormal
-          ? [
-              {
-                name: "directed",
-                label: "Directed?",
-                defaultValue: "yes",
-                options: ["yes", "no"],
-              },
-            ]
-          : []),
+        isHier
+          ? { name: "relation",  label: "Relation",   defaultValue: "parent→child", options: ["parent→child", "child→parent"] }
+          : { name: "direction", label: "Direction",  defaultValue: "outgoing",     options: ["outgoing", "incoming"] },
+        { name: "other",  label: "Other node",   defaultValue: data.nodes.filter((n) => n.id !== src)[0]?.id || "", options: data.nodes.filter((n) => n.id !== src).map((n) => n.id) },
+        { name: "weight", label: "Weight (optional)",defaultValue: "", placeholder: "number or blank" },
+        ...(isNorm ? [{ name: "directed", label: "Directed?", defaultValue: "yes", options: ["yes", "no"] }] : []),
       ],
       onSubmit: ({ relation, direction, other, weight, directed }) => {
         if (!other.trim()) return setModalConfig(null);
-        const otherNode = data.nodes.find((n) => n.id === other.trim());
-        if (!otherNode) {
-          alert(`Node "${other}" not found.`);
-          return setModalConfig(null);
-        }
-
-        let source, target;
-        if (hierarchical) {
-          [source, target] =
-            relation === "child→parent"
-              ? [other, selectedNode]
-              : [selectedNode, other];
-        } else {
-          [source, target] =
-            direction === "outgoing"
-              ? [selectedNode, other]
-              : [other, selectedNode];
-        }
-
-        if (data.links.some((l) => l.source === source && l.target === target)) {
-          alert("Link already exists in that direction.");
-          return setModalConfig(null);
-        }
-
-        const w =
-          weight === ""
-            ? null
-            : isNaN(Number(weight))
-            ? null
-            : Number(weight);
-        const isDirected = !isNormal || directed === "yes";
-
-        applyChange((d) => ({
-          nodes: d.nodes,
-          links: [
-            ...d.links,
-            { source, target, weight: w, directed: isDirected },
-          ],
-        }));
+        const target = data.nodes.find((n) => n.id === other.trim());
+        if (!target) { addToast(`Node "${other}" not found.`, "error"); return setModalConfig(null); }
+        let source, tgt;
+        if (isHier) [source, tgt] = relation === "child→parent" ? [other.trim(), src] : [src, other.trim()];
+        else        [source, tgt] = direction === "outgoing"    ? [src, other.trim()] : [other.trim(), src];
+        if (data.links.some((l) => l.source === source && l.target === tgt)) { addToast("Link already exists.", "warning"); return setModalConfig(null); }
+        const w = weight === "" || isNaN(Number(weight)) ? null : Number(weight);
+        const dir = !isNorm || directed === "yes";
+        applyChange((d) => ({ nodes: d.nodes, links: [...d.links, { source, target: tgt, weight: w, directed: dir }] }));
         setModalConfig(null);
       },
     });
   }
 
   function openEditNodeModal() {
-    if (selected.type !== "node") return alert("Select a node first.");
-    const node = data.nodes.find((n) => n.id === selected.id);
-    if (!node) return;
-
+    if (selected.type !== "node") return addToast("Select a node first.", "warning");
+    const n = data.nodes.find((x) => x.id === selected.id);
+    if (!n) return;
     setModalConfig({
-      title: `Edit Node "${node.id}"`,
+      title: `Edit Node "${n.id}"`,
       fields: [
-        {
-          name: "label",
-          label: "Label",
-          defaultValue: node.label,
-          placeholder: "New label",
-          autoFocus: true,
-        },
-        {
-          name: "nodeType",
-          label: "Node Type",
-          defaultValue: node.nodeType || "server",
-          options: NODE_TYPES,
-        },
+        { name: "label",    label: "Label",     defaultValue: n.label,            autoFocus: true },
+        { name: "nodeType", label: "Node Type", defaultValue: n.nodeType || "server", options: NODE_TYPES },
       ],
       onSubmit: ({ label, nodeType }) => {
         if (!label.trim()) return setModalConfig(null);
         applyChange((d) => ({
-          nodes: d.nodes.map((n) =>
-            n.id === node.id
-              ? { ...n, label: label.trim(), nodeType: nodeType || n.nodeType }
-              : n
-          ),
+          nodes: d.nodes.map((x) => x.id === n.id ? { ...x, label: label.trim(), nodeType: nodeType || x.nodeType } : x),
           links: d.links,
         }));
         setModalConfig(null);
@@ -863,92 +701,43 @@ export default function GraphEditor() {
   }
 
   function openEditLinkModal() {
-    if (selected.type !== "link") return alert("Select a link first.");
+    if (selected.type !== "link") return addToast("Select a link first.", "warning");
     const { source, target } = selected.id;
-    const link = data.links.find(
-      (l) =>
-        (l.source === source && l.target === target) ||
-        (l.source === target && l.target === source)
+    const lnk = data.links.find((l) =>
+      (l.source === source && l.target === target) || (l.source === target && l.target === source)
     );
-    if (!link) return;
-
-    const hierarchical = layoutType === "HIERARCHICAL";
-    const isNormal = layoutType === "NORMAL";
-
+    if (!lnk) return;
+    const isHier = layoutType === "HIERARCHICAL";
+    const isNorm = layoutType === "NORMAL";
     setModalConfig({
-      title: `Edit Link (${link.source} → ${link.target})`,
+      title: `Edit Link (${lnk.source} → ${lnk.target})`,
       fields: [
-        { name: "source", label: "Source (id)", defaultValue: link.source },
-        { name: "target", label: "Target (id)", defaultValue: link.target },
-        {
-          name: "weight",
-          label: "Weight (blank = none)",
-          defaultValue: link.weight == null ? "" : String(link.weight),
-        },
-        ...(hierarchical
-          ? [
-              {
-                name: "relation",
-                label: "Relation",
-                defaultValue: "parent→child",
-                options: ["parent→child", "child→parent"],
-              },
-            ]
-          : []),
-        ...(isNormal
-          ? [
-              {
-                name: "directed",
-                label: "Directed?",
-                defaultValue: link.directed ? "yes" : "no",
-                options: ["yes", "no"],
-              },
-            ]
-          : []),
+        { name: "source", label: "Source ID", defaultValue: lnk.source },
+        { name: "target", label: "Target ID", defaultValue: lnk.target },
+        { name: "weight", label: "Weight (blank = none)", defaultValue: lnk.weight == null ? "" : String(lnk.weight) },
+        ...(isHier ? [{ name: "relation",  label: "Relation",   defaultValue: "parent→child", options: ["parent→child", "child→parent"] }] : []),
+        ...(isNorm ? [{ name: "directed",  label: "Directed?",  defaultValue: lnk.directed ? "yes" : "no", options: ["yes", "no"] }] : []),
       ],
       onSubmit: ({ source: ns, target: nt, weight, relation, directed }) => {
         if (!ns.trim() || !nt.trim()) return setModalConfig(null);
-        if (
-          !data.nodes.find((n) => n.id === ns) ||
-          !data.nodes.find((n) => n.id === nt)
-        ) {
-          alert("Source or target node not found.");
-          return setModalConfig(null);
+        if (!data.nodes.find((x) => x.id === ns) || !data.nodes.find((x) => x.id === nt)) {
+          addToast("Node not found.", "error"); return setModalConfig(null);
         }
-
-        let fs = ns, ft = nt;
-        if (hierarchical && relation === "child→parent") {
-          [fs, ft] = [nt, ns];
-        }
-
+        let fs = ns.trim(), ft = nt.trim();
+        if (isHier && relation === "child→parent") [fs, ft] = [ft, fs];
         const conflict = data.links.some((l) => {
-          const sameOld =
-            (l.source === link.source && l.target === link.target) ||
-            (l.source === link.target && l.target === link.source);
-          const wouldBe =
-            (l.source === fs && l.target === ft) ||
-            (l.source === ft && l.target === fs);
+          const sameOld = (l.source === lnk.source && l.target === lnk.target) || (l.source === lnk.target && l.target === lnk.source);
+          const wouldBe = (l.source === fs && l.target === ft) || (l.source === ft && l.target === fs);
           return !sameOld && wouldBe;
         });
-        if (conflict) {
-          alert("Another link between those nodes already exists.");
-          return setModalConfig(null);
-        }
-
-        const w =
-          weight === ""
-            ? null
-            : isNaN(Number(weight))
-            ? null
-            : Number(weight);
-        const isDirected = !isNormal || directed === "yes";
-
+        if (conflict) { addToast("Another link between those nodes already exists.", "warning"); return setModalConfig(null); }
+        const w   = weight === "" || isNaN(Number(weight)) ? null : Number(weight);
+        const dir = !isNorm || directed === "yes";
         applyChange((d) => ({
           nodes: d.nodes,
           links: d.links.map((l) =>
-            (l.source === link.source && l.target === link.target) ||
-            (l.source === link.target && l.target === link.source)
-              ? { source: fs, target: ft, weight: w, directed: isDirected }
+            (l.source === lnk.source && l.target === lnk.target) || (l.source === lnk.target && l.target === lnk.source)
+              ? { source: fs, target: ft, weight: w, directed: dir }
               : l
           ),
         }));
@@ -958,42 +747,20 @@ export default function GraphEditor() {
   }
 
   function openDeleteSelectedModal() {
-    if (!selected.type) return alert("No selection.");
-    const label =
-      selected.type === "node"
-        ? selected.id
-        : `${selected.id.source} → ${selected.id.target}`;
-
+    if (!selected.type) return addToast("Nothing selected.", "warning");
+    const label = selected.type === "node" ? selected.id : `${selected.id.source} → ${selected.id.target}`;
     setModalConfig({
       title: `Delete ${selected.type}`,
-      fields: [
-        {
-          name: "confirm",
-          label: `Type DELETE to confirm deletion of "${label}"`,
-          defaultValue: "",
-        },
-      ],
-      onSubmit: ({ confirm }) => {
-        if (confirm !== "DELETE") return setModalConfig(null);
+      fields: [{ name: "_msg", label: "", type: "message", text: `Are you sure you want to delete "${label}"? You can undo this action.` }],
+      onSubmit: () => {
         if (selected.type === "node") {
           const id = selected.id;
-          applyChange((d) => ({
-            nodes: d.nodes.filter((n) => n.id !== id),
-            links: d.links.filter(
-              (l) => l.source !== id && l.target !== id
-            ),
-          }));
-        } else if (selected.type === "link") {
+          applyChange((d) => ({ nodes: d.nodes.filter((n) => n.id !== id), links: d.links.filter((l) => l.source !== id && l.target !== id) }));
+        } else {
           const { source, target } = selected.id;
           applyChange((d) => ({
             nodes: d.nodes,
-            links: d.links.filter(
-              (l) =>
-                !(
-                  (l.source === source && l.target === target) ||
-                  (l.source === target && l.target === source)
-                )
-            ),
+            links: d.links.filter((l) => !((l.source === source && l.target === target) || (l.source === target && l.target === source))),
           }));
         }
         setModalConfig(null);
@@ -1002,266 +769,192 @@ export default function GraphEditor() {
   }
 
   function openShortestPathModal() {
-    if (shortestPath.length > 0) {
-      setShortestPath([]);
-      return;
-    }
-    if (layoutType !== "NORMAL") {
-      return alert("Shortest path is only available in Force-directed layout.");
-    }
-    const missing = data.links.some(
-      (l) => l.weight == null || isNaN(Number(l.weight))
-    );
-    if (missing) {
-      return alert(
-        "All links must have numeric weights to run shortest path."
-      );
-    }
-
+    if (shortestPath.length > 0) { setShortestPath([]); return; }
+    if (data.links.some((l) => l.weight == null || isNaN(Number(l.weight)))) return addToast("All links must have numeric weights.", "warning");
     setModalConfig({
-      title: "Find Shortest Path (Dijkstra)",
+      title: "Shortest Path (Dijkstra)",
       fields: [
-        { name: "start", label: "Start node id", defaultValue: "", autoFocus: true },
-        { name: "end", label: "End node id", defaultValue: "" },
+        { name: "start", label: "Start node ID", defaultValue: "", autoFocus: true },
+        { name: "end",   label: "End node ID",   defaultValue: "" },
       ],
       onSubmit: ({ start, end }) => {
         if (!start || !end) return setModalConfig(null);
-        if (
-          !data.nodes.find((n) => n.id === start) ||
-          !data.nodes.find((n) => n.id === end)
-        ) {
-          alert("Start or end node not found.");
-          return setModalConfig(null);
-        }
-        const path = dijkstra(data.nodes, data.links, start, end);
-        if (!path) alert("No path found between those nodes.");
+        if (!data.nodes.find((n) => n.id === start) || !data.nodes.find((n) => n.id === end)) { addToast("Node not found.", "error"); return setModalConfig(null); }
+        const path = dijkstra(data.nodes, data.links, start.trim(), end.trim());
+        if (!path) addToast("No path found between those nodes.", "warning");
         else setShortestPath(path);
         setModalConfig(null);
       },
     });
   }
 
-  /* -------------------------
-     Algorithm runners
-     ------------------------- */
+  // ── Algorithms ────────────────────────────────────────────────────────────
   function runBFS() {
-    if (selected.type !== "node") return alert("Select a start node first.");
+    if (selected.type !== "node") return addToast("Select a start node first.", "warning");
     const result = bfs(data.nodes, data.links, selected.id);
-    setAlgorithmResult({ type: "bfs", ...result });
-    setAnalysis(null);
-    setShortestPath([]);
+    const unreachable = data.nodes.length - result.visited.size;
+    setAlgorithmResult({ type: "bfs", ...result, startId: selected.id, unreachable });
+    setAnalysis(null); setShortestPath([]);
   }
 
   function runDFS() {
-    if (selected.type !== "node") return alert("Select a start node first.");
+    if (selected.type !== "node") return addToast("Select a start node first.", "warning");
     const result = dfs(data.nodes, data.links, selected.id);
-    setAlgorithmResult({ type: "dfs", ...result });
-    setAnalysis(null);
-    setShortestPath([]);
+    const unreachable = data.nodes.length - result.visited.size;
+    setAlgorithmResult({ type: "dfs", ...result, startId: selected.id, unreachable });
+    setAnalysis(null); setShortestPath([]);
   }
 
   function runTopologicalSort() {
     const order = topologicalSort(data.nodes, data.links);
-    if (!order) {
-      alert(
-        "Topological sort failed: graph contains cycles.\nUse 'Detect Cycles' to verify."
-      );
-      return;
-    }
+    if (!order) { addToast("Topological sort failed: graph has cycles.", "error"); return; }
     setAlgorithmResult({ type: "topological", order });
-    setAnalysis(null);
-    setShortestPath([]);
+    setAnalysis(null); setShortestPath([]);
   }
 
   function runMST() {
-    const hasWeights = data.links.some((l) => l.weight != null);
-    if (!hasWeights) {
-      return alert("Assign weights to links first (Edit Link).");
-    }
+    if (!data.links.some((l) => l.weight != null)) return addToast("Assign weights to links first.", "warning");
     const edges = kruskalMST(data.nodes, data.links);
-    setAlgorithmResult({ type: "mst", edges });
-    setAnalysis(null);
-    setShortestPath([]);
+    const totalWeight = edges.reduce((s, e) => s + (Number(e.weight) || 0), 0);
+    setAlgorithmResult({ type: "mst", edges, totalWeight });
+    setAnalysis(null); setShortestPath([]);
   }
 
   function runCycleDetection() {
     const has = detectCycles(data.nodes, data.links);
-    alert(
-      has
-        ? "⚠ Cycles detected — graph is NOT a DAG."
-        : "✓ No cycles — graph is a valid DAG."
-    );
+    setAlgorithmResult({
+      type: "cycles",
+      order: null,
+      hasCycles: has,
+      label: has ? "⚠ CYCLES DETECTED — not a DAG" : "✓ NO CYCLES — valid DAG",
+    });
+    setAnalysis(null); setShortestPath([]);
   }
 
-  /* -------------------------
-     Analysis functions
-     ------------------------- */
+  // ── Analysis ─────────────────────────────────────────────────────────────
   function runDegreeCentrality() {
     const values = {};
     data.nodes.forEach((n) => {
-      values[n.id] = data.links.filter(
-        (l) => l.source === n.id || l.target === n.id
-      ).length;
+      values[n.id] = data.links.filter((l) => l.source === n.id || l.target === n.id).length;
     });
     setAnalysis({ type: "degree", values });
     setAlgorithmResult(null);
   }
 
   function runPageRank() {
-    if (layoutType !== "HIERARCHICAL") {
-      alert("PageRank is only available in Hierarchical layout.");
-      return;
-    }
     const indegree = {};
     data.nodes.forEach((n) => (indegree[n.id] = 0));
-    data.links.forEach((l) => {
-      indegree[l.target] = (indegree[l.target] || 0) + 1;
-    });
-    const roots = data.nodes
-      .filter((n) => indegree[n.id] === 0)
-      .map((n) => n.id);
-
+    data.links.forEach((l) => { indegree[l.target] = (indegree[l.target] || 0) + 1; });
+    const roots = data.nodes.filter((n) => indegree[n.id] === 0).map((n) => n.id);
     const queue = [...roots];
-    const rank = {};
+    const rank  = {};
     roots.forEach((r) => (rank[r] = 1));
-
     while (queue.length) {
-      const parent = queue.shift();
-      data.links
-        .filter((l) => l.source === parent)
-        .forEach((l) => {
-          rank[l.target] = Math.max(
-            rank[l.target] || 0,
-            (rank[parent] || 1) * 0.85
-          );
-          queue.push(l.target);
-        });
+      const p = queue.shift();
+      data.links.filter((l) => l.source === p).forEach((l) => {
+        rank[l.target] = Math.max(rank[l.target] || 0, (rank[p] || 1) * 0.85);
+        queue.push(l.target);
+      });
     }
-
     const maxVal = Math.max(1, ...Object.values(rank));
     const values = {};
-    data.nodes.forEach((n) => {
-      values[n.id] = (rank[n.id] || 0) / maxVal;
-    });
+    data.nodes.forEach((n) => (values[n.id] = (rank[n.id] || 0) / maxVal));
     setAnalysis({ type: "pagerank", values });
     setAlgorithmResult(null);
   }
 
-  /* -------------------------
-     Failure simulation
-     ------------------------- */
+  // ── Failure simulation ────────────────────────────────────────────────────
   function toggleFailureMode() {
     const next = !failureMode;
     setFailureMode(next);
-    if (!next) {
-      setFailedNodes(new Set());
-      setAffectedNodes(new Set());
+    if (!next) { setFailedNodes(new Set()); setAffectedNodes(new Set()); }
+  }
+
+  function resetFailure() { setFailedNodes(new Set()); setAffectedNodes(new Set()); }
+
+  function togglePinMode() {
+    const next = !pinMode;
+    setPinMode(next);
+    const svg = svgRef.current;
+    if (!svg) return;
+    if (next) {
+      // Pin all nodes at their current positions
+      d3.select(svg).select("g.nodes").selectAll("g").each(function(d) {
+        if (d) { d.fx = d.x; d.fy = d.y; }
+      });
+      simRef.current?.stop();
+    } else {
+      // Release all nodes back to the simulation
+      d3.select(svg).select("g.nodes").selectAll("g").each(function(d) {
+        if (d) { d.fx = null; d.fy = null; }
+      });
+      simRef.current?.alpha(0.2).restart();
     }
   }
 
-  function resetFailure() {
-    setFailedNodes(new Set());
-    setAffectedNodes(new Set());
-  }
-
-  /* -------------------------
-     Drill-down
-     ------------------------- */
+  // ── Drill-down ────────────────────────────────────────────────────────────
   function openDrilldown() {
-    if (selected.type !== "node") return alert("Select a node first.");
+    if (selected.type !== "node") return addToast("Select a node first.", "warning");
     setDrilldownNodeId(selected.id);
   }
 
   function handleSubGraphUpdate(newSubGraph) {
     const id = drilldownNodeId;
     applyChange((d) => ({
-      nodes: d.nodes.map((n) =>
-        n.id === id ? { ...n, subGraph: newSubGraph } : n
-      ),
+      nodes: d.nodes.map((n) => n.id === id ? { ...n, subGraph: newSubGraph } : n),
       links: d.links,
     }));
   }
 
-  /* -------------------------
-     Export / Import
-     ------------------------- */
-  function handleExport() {
-    if (!data?.nodes?.length) {
-      alert("Nothing to export.");
-      return;
-    }
-
-    const choice = window.prompt(
-      "Export type:\n  'json' — topology JSON\n  'png'  — image",
-      "json"
-    );
-    if (!choice) return;
-
-    if (choice.toLowerCase() === "json") {
-      const blob = new Blob(
-        [
-          JSON.stringify(
-            {
-              nodes: data.nodes.map((n) => ({
-                id: n.id,
-                label: n.label,
-                nodeType: n.nodeType ?? "server",
-                subGraph: n.subGraph ?? { nodes: [], links: [] },
-              })),
-              links: data.links.map((l) => ({
-                source: l.source,
-                target: l.target,
-                weight: l.weight ?? null,
-                directed: l.directed ?? true,
-              })),
-            },
-            null,
-            2
-          ),
-        ],
-        { type: "application/json" }
-      );
+  // ── Export / Import ──────────────────────────────────────────────────────
+  function doExport(format) {
+    if (format === "json") {
+      const blob = new Blob([JSON.stringify({
+        nodes: data.nodes.map((n) => ({ id: n.id, label: n.label, nodeType: n.nodeType ?? "server", subGraph: n.subGraph ?? { nodes: [], links: [] } })),
+        links: data.links.map((l) => ({ source: l.source, target: l.target, weight: l.weight ?? null, directed: l.directed ?? true })),
+      }, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "topology.json";
-      a.click();
+      const a = document.createElement("a"); a.href = url; a.download = "topology.json"; a.click();
       URL.revokeObjectURL(url);
       return;
     }
 
-    // PNG export
+    // PNG
     const svgElement = svgRef.current;
     if (!svgElement) return;
     const clone = svgElement.cloneNode(true);
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], {
-      type: "image/svg+xml;charset=utf-8",
-    });
+    const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(svgBlob);
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = svgElement.clientWidth || window.innerWidth;
+      canvas.width  = svgElement.clientWidth  || window.innerWidth;
       canvas.height = svgElement.clientHeight || window.innerHeight;
       const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#070708";
+      ctx.fillStyle = DS.bg;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
       URL.revokeObjectURL(url);
-      canvas.toBlob((blob) => {
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = "topology.png";
-        a.click();
+      canvas.toBlob((b) => {
+        const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "topology.png"; a.click();
       });
     };
-    img.onerror = () => {
-      alert("PNG export failed.");
-      URL.revokeObjectURL(url);
-    };
+    img.onerror = () => { addToast("PNG export failed.", "error"); URL.revokeObjectURL(url); };
     img.src = url;
+  }
+
+  function handleExport() {
+    if (!data?.nodes?.length) return addToast("Nothing to export.", "warning");
+    setModalConfig({
+      title: "Export Graph",
+      fields: [{ name: "format", label: "Export format", defaultValue: "json", options: ["json", "png"] }],
+      onSubmit: ({ format }) => {
+        setModalConfig(null);
+        doExport(format);
+      },
+    });
   }
 
   function handleImport(e) {
@@ -1271,56 +964,28 @@ export default function GraphEditor() {
     reader.onload = (ev) => {
       try {
         const parsed = JSON.parse(ev.target.result);
-        if (!parsed.nodes || !parsed.links)
-          return alert("Invalid file: must contain 'nodes' and 'links'.");
-        const nodes = parsed.nodes.map((n) => ({
-          id: n.id,
-          label: n.label ?? n.id,
-          nodeType: n.nodeType ?? "server",
-          subGraph: n.subGraph ?? { nodes: [], links: [] },
-        }));
-        const links = parsed.links.map((l) => ({
-          source: l.source,
-          target: l.target,
-          weight: l.weight ?? null,
-          directed: l.directed ?? true,
-        }));
+        if (!parsed.nodes || !parsed.links) return addToast("Invalid file: must contain 'nodes' and 'links'.", "error");
+        const errors = validateGraphData(parsed);
+        if (errors.length) { addToast(errors[0], "error"); return; }
+        const nodes = parsed.nodes.map((n) => ({ id: n.id, label: n.label ?? n.id, nodeType: n.nodeType ?? "server", subGraph: n.subGraph ?? { nodes: [], links: [] } }));
+        const links = parsed.links.map((l) => ({ source: l.source, target: l.target, weight: l.weight ?? null, directed: l.directed ?? true }));
         updateData({ nodes, links });
         clearAllHighlights();
-      } catch {
-        alert("Failed to parse JSON file.");
-      }
+        addToast("Graph imported successfully.", "success");
+      } catch { addToast("Failed to parse JSON.", "error"); }
     };
     reader.readAsText(file);
     e.target.value = "";
   }
 
-  /* -------------------------
-     Version management
-     ------------------------- */
+  // ── Versions ──────────────────────────────────────────────────────────────
   function openSaveVersionModal() {
     setModalConfig({
       title: "Save Version",
-      fields: [
-        {
-          name: "name",
-          label: "Version name",
-          defaultValue: "",
-          placeholder: "e.g., v1-with-cdn",
-          autoFocus: true,
-        },
-      ],
+      fields: [{ name: "name", label: "Version name", defaultValue: "", placeholder: "e.g., v1-with-cdn", autoFocus: true }],
       onSubmit: ({ name }) => {
         if (!name.trim()) return setModalConfig(null);
-        const newVersions = {
-          ...versions,
-          [name.trim()]: {
-            nodes: data.nodes,
-            links: data.links,
-            savedAt: new Date().toISOString(),
-          },
-        };
-        saveVersions(newVersions);
+        saveVersions({ ...versions, [name.trim()]: { nodes: data.nodes, links: data.links, savedAt: new Date().toISOString() } });
         setModalConfig(null);
       },
     });
@@ -1328,17 +993,10 @@ export default function GraphEditor() {
 
   function openLoadVersionModal() {
     const keys = Object.keys(versions);
-    if (!keys.length) return alert("No saved versions.");
+    if (!keys.length) return addToast("No saved versions.", "warning");
     setModalConfig({
       title: "Load Version",
-      fields: [
-        {
-          name: "version",
-          label: "Choose version",
-          defaultValue: keys[0],
-          options: keys,
-        },
-      ],
+      fields: [{ name: "version", label: "Choose version", defaultValue: keys[0], options: keys }],
       onSubmit: ({ version }) => {
         const v = versions[version];
         if (!v) return setModalConfig(null);
@@ -1351,141 +1009,233 @@ export default function GraphEditor() {
 
   function openDeleteVersionModal() {
     const keys = Object.keys(versions);
-    if (!keys.length) return alert("No saved versions.");
+    if (!keys.length) return addToast("No saved versions.", "warning");
     setModalConfig({
       title: "Delete Version",
       fields: [
-        {
-          name: "version",
-          label: "Choose version",
-          defaultValue: keys[0],
-          options: keys,
-        },
-        { name: "confirm", label: "Type DELETE to confirm", defaultValue: "" },
+        { name: "version", label: "Choose version", defaultValue: keys[0], options: keys },
       ],
-      onSubmit: ({ version, confirm }) => {
-        if (confirm !== "DELETE") return setModalConfig(null);
-        const newVersions = { ...versions };
-        delete newVersions[version];
-        saveVersions(newVersions);
+      onSubmit: ({ version }) => {
+        const next = { ...versions }; delete next[version]; saveVersions(next);
         setModalConfig(null);
       },
     });
   }
 
-  /* -------------------------
-     Render
-     ------------------------- */
-  const drilldownNode = drilldownNodeId
-    ? data.nodes.find((n) => n.id === drilldownNodeId)
-    : null;
+  // ── Render ────────────────────────────────────────────────────────────────
+  const drilldownNode = drilldownNodeId ? data.nodes.find((n) => n.id === drilldownNodeId) : null;
+
+  const ctxValue = {
+    // Search / Filter / Layout
+    search, setSearch, searchRef,
+    filter, setFilter,
+    layoutType, setLayoutType,
+    hierDirection, setHierDirection,
+    // History
+    historyCtrl,
+    // Graph data
+    graphStats, data, selected,
+    // CRUD
+    openAddNodeModal, openAddLinkModal,
+    openEditNodeModal, openEditLinkModal,
+    openDeleteSelectedModal,
+    openDrilldown,
+    selectedNodeHasSubGraph:
+      selected.type === "node" &&
+      (data.nodes.find((n) => n.id === selected.id)?.subGraph?.nodes?.length ?? 0) > 0,
+    // Algorithms
+    runBFS, runDFS, runTopologicalSort, runMST, runCycleDetection,
+    openShortestPathModal,
+    algorithmResult, clearAlgorithmResult: () => setAlgorithmResult(null),
+    // Analysis
+    runDegreeCentrality, runPageRank,
+    clearAnalysis: () => setAnalysis(null), analysisActive: !!analysis,
+    // Failure simulation
+    failureMode, toggleFailureMode,
+    pinMode, togglePinMode,
+    failedCount: failedNodes.size, affectedCount: affectedNodes.size, resetFailure,
+    // Versions
+    versions, saveVersions,
+    openSaveVersionModal, openLoadVersionModal, openDeleteVersionModal,
+    updateData,
+    // Export / Import
+    handleExport, handleImport, fileInputRef,
+    // Toast
+    addToast,
+  };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        height: "100vh",
-        background: "#0e0e12",
-        color: "#eaeaf2",
-        fontFamily: "Inter, Arial, sans-serif",
-      }}
-    >
+    <GraphEditorContext.Provider value={ctxValue}>
+    <div style={{
+      display: "flex",
+      width: "100%",
+      height: "100%",
+      background: DS.bg,
+      color: DS.textPrimary,
+      fontFamily: "'JetBrains Mono', monospace",
+      overflow: "hidden",
+    }}>
       {/* Sidebar */}
-      <Sidebar
-        search={search}
-        setSearch={setSearch}
-        filter={filter}
-        setFilter={setFilter}
-        layoutType={layoutType}
-        setLayoutType={setLayoutType}
-        hierDirection={hierDirection}
-        setHierDirection={setHierDirection}
-        historyCtrl={historyCtrl}
-        openAddNodeModal={openAddNodeModal}
-        openAddLinkModal={openAddLinkModal}
-        openEditNodeModal={openEditNodeModal}
-        openEditLinkModal={openEditLinkModal}
-        openDeleteSelectedModal={openDeleteSelectedModal}
-        openShortestPathModal={openShortestPathModal}
-        handleExport={handleExport}
-        handleImport={handleImport}
-        fileInputRef={fileInputRef}
-        versions={versions}
-        saveVersions={saveVersions}
-        updateData={updateData}
-        openSaveVersionModal={openSaveVersionModal}
-        openLoadVersionModal={openLoadVersionModal}
-        openDeleteVersionModal={openDeleteVersionModal}
-        data={data}
-        selected={selected}
-        // Analysis
-        runDegreeCentrality={runDegreeCentrality}
-        runPageRank={runPageRank}
-        clearAnalysis={() => setAnalysis(null)}
-        layoutIsHierarchical={layoutType === "HIERARCHICAL"}
-        analysisActive={!!analysis}
-        // Algorithms
-        runBFS={runBFS}
-        runDFS={runDFS}
-        runTopologicalSort={runTopologicalSort}
-        runMST={runMST}
-        runCycleDetection={runCycleDetection}
-        algorithmResult={algorithmResult}
-        clearAlgorithmResult={() => setAlgorithmResult(null)}
-        // Failure simulation
-        failureMode={failureMode}
-        toggleFailureMode={toggleFailureMode}
-        failedCount={failedNodes.size}
-        affectedCount={affectedNodes.size}
-        resetFailure={resetFailure}
-        // Drill-down
-        openDrilldown={openDrilldown}
-        selectedNodeHasSubGraph={
-          selected.type === "node" &&
-          (data.nodes.find((n) => n.id === selected.id)?.subGraph?.nodes
-            ?.length ?? 0) > 0
-        }
-        // Graph stats
-        graphStats={graphStats}
-      />
+      <Sidebar />
 
       {/* Canvas */}
-      <div style={{ flex: 1, position: "relative" }}>
+      <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        {/* Failure mode banner */}
         {failureMode && (
+          <div style={{
+            position: "absolute",
+            top: 14,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid #ef4444",
+            borderRadius: 2,
+            padding: "5px 18px",
+            color: "#ef4444",
+            fontSize: 10,
+            fontFamily: "'JetBrains Mono', monospace",
+            fontWeight: 700,
+            letterSpacing: "0.1em",
+            zIndex: 100,
+            pointerEvents: "none",
+            boxShadow: "0 0 20px rgba(239,68,68,0.15)",
+          }}>
+            ⚠ FAILURE MODE — CLICK NODES TO MARK FAILED
+          </div>
+        )}
+
+        <svg
+          ref={svgRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            background: DS.bg,
+            display: "block",
+          }}
+        />
+
+        {/* Node tooltip */}
+        <div
+          ref={tooltipRef}
+          style={{
+            position: "absolute",
+            pointerEvents: "none",
+            opacity: 0,
+            background: DS.bgPanel,
+            border: `1px solid ${DS.border}`,
+            borderRadius: 4,
+            padding: "6px 10px",
+            fontSize: 11,
+            fontFamily: "'JetBrains Mono', monospace",
+            color: DS.text,
+            lineHeight: 1.5,
+            zIndex: 50,
+            transition: "opacity 0.15s ease",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            maxWidth: 220,
+            whiteSpace: "nowrap",
+          }}
+        />
+
+        {/* Right-click context menu */}
+        {ctxMenu && (
           <div
             style={{
               position: "absolute",
-              top: 16,
-              left: "50%",
-              transform: "translateX(-50%)",
-              background: "#ef444422",
-              border: "1px solid #ef4444",
-              borderRadius: 8,
-              padding: "6px 16px",
-              color: "#ef4444",
-              fontSize: 13,
-              fontWeight: 600,
-              zIndex: 100,
-              pointerEvents: "none",
+              left: ctxMenu.x,
+              top: ctxMenu.y,
+              background: DS.bgPanel,
+              border: `1px solid ${DS.border}`,
+              borderRadius: 4,
+              padding: "4px 0",
+              zIndex: 200,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+              minWidth: 160,
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 11,
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            FAILURE MODE — click nodes to mark as failed
+            {[
+              { label: "Edit Node", action: () => { openEditNodeModal(); setCtxMenu(null); } },
+              { label: "Add Link from Here", action: () => { openAddLinkModal(); setCtxMenu(null); } },
+              { label: "Drill Down", action: () => { openDrilldown(); setCtxMenu(null); } },
+              null,
+              { label: "Delete Node", action: () => { openDeleteSelectedModal(); setCtxMenu(null); }, danger: true },
+            ].map((item, i) =>
+              item === null ? (
+                <div key={i} style={{ height: 1, background: DS.border, margin: "4px 0" }} />
+              ) : (
+                <div
+                  key={i}
+                  onClick={item.action}
+                  style={{
+                    padding: "6px 14px",
+                    cursor: "pointer",
+                    color: item.danger ? "#ef4444" : DS.text,
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = DS.bgCard; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                >
+                  {item.label}
+                </div>
+              )
+            )}
           </div>
         )}
-        <svg
-          ref={svgRef}
-          style={{ width: "100%", height: "100%", background: "#070708" }}
-        />
+
+        {/* Empty state */}
+        {data.nodes.length === 0 && (
+          <div style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            pointerEvents: "none",
+          }}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke={DS.accent} strokeWidth="1" opacity="0.3">
+              <circle cx="12" cy="4" r="2"/>
+              <circle cx="4" cy="20" r="2"/>
+              <circle cx="20" cy="20" r="2"/>
+              <line x1="12" y1="6" x2="5.5" y2="18.5"/>
+              <line x1="12" y1="6" x2="18.5" y2="18.5"/>
+              <line x1="6" y1="20" x2="18" y2="20"/>
+            </svg>
+            <span style={{ fontSize: 13, color: DS.textMuted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.04em" }}>
+              NO NODES YET
+            </span>
+            <span style={{ fontSize: 12, color: DS.textMuted, opacity: 0.6, fontFamily: "'JetBrains Mono', monospace" }}>
+              Click + NODE in the sidebar to get started
+            </span>
+          </div>
+        )}
+
+        {/* Toast notifications */}
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+        {/* Drill-down panel */}
+        {drilldownNode && (
+          <DrilldownPanel
+            node={drilldownNode}
+            onUpdate={handleSubGraphUpdate}
+            onClose={() => setDrilldownNodeId(null)}
+            addToast={addToast}
+          />
+        )}
       </div>
 
-      {/* Drill-down panel */}
-      {drilldownNode && (
-        <DrilldownPanel
-          node={drilldownNode}
-          onUpdate={handleSubGraphUpdate}
-          onClose={() => setDrilldownNodeId(null)}
-        />
-      )}
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        onChange={handleImport}
+        style={{ display: "none" }}
+      />
 
       {/* Modal */}
       {modalConfig && (
@@ -1497,5 +1247,6 @@ export default function GraphEditor() {
         />
       )}
     </div>
+    </GraphEditorContext.Provider>
   );
 }

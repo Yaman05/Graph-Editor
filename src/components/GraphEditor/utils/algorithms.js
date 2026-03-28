@@ -42,22 +42,26 @@ export function bfs(nodes, links, startId) {
 }
 
 /**
- * DFS from startId (iterative to avoid stack overflow on large graphs).
+ * DFS from startId (iterative with explicit stack to avoid stack overflow).
  * Returns { order: string[], visited: Set<string> }
  */
 export function dfs(nodes, links, startId) {
   const adj = buildUndirectedAdj(nodes, links);
   const visited = new Set();
   const order = [];
+  const stack = [startId];
 
-  function visit(id) {
+  while (stack.length) {
+    const id = stack.pop();
+    if (visited.has(id)) continue;
     visited.add(id);
     order.push(id);
-    for (const nb of adj.get(id) || []) {
-      if (!visited.has(nb)) visit(nb);
+    // Push neighbors in reverse so the first neighbor is visited first
+    const neighbors = adj.get(id) || [];
+    for (let i = neighbors.length - 1; i >= 0; i--) {
+      if (!visited.has(neighbors[i])) stack.push(neighbors[i]);
     }
   }
-  visit(startId);
   return { order, visited };
 }
 

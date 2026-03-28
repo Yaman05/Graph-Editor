@@ -1,7 +1,12 @@
 import GraphEditor from "./components/GraphEditor/GraphEditor";
+import ErrorBoundary from "./components/ErrorBoundary";
 
 function App() {
-  return <GraphEditor />;
+  return (
+    <ErrorBoundary>
+      <GraphEditor />
+    </ErrorBoundary>
+  );
 }
 
 export default App;
