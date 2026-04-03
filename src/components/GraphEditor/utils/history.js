@@ -1,38 +1,46 @@
-import { useState } from "react";
+import { useReducer, useCallback } from "react";
+
+const MAX_HISTORY = 10;
+
+function reducer(state, action) {
+  switch (action.type) {
+    case "update":
+      return {
+        current: action.payload,
+        past: [...state.past, state.current].slice(-MAX_HISTORY),
+        future: [],
+      };
+    case "undo": {
+      if (!state.past.length) return state;
+      return {
+        current: state.past[state.past.length - 1],
+        past: state.past.slice(0, -1),
+        future: [state.current, ...state.future],
+      };
+    }
+    case "redo": {
+      if (!state.future.length) return state;
+      return {
+        current: state.future[0],
+        past: [...state.past, state.current],
+        future: state.future.slice(1),
+      };
+    }
+    default:
+      return state;
+  }
+}
 
 export function useHistoryState(initial) {
-  const [state, setState] = useState(initial);
-  const [history, setHistory] = useState([]);
-  const [future, setFuture] = useState([]);
+  const [state, dispatch] = useReducer(reducer, {
+    current: initial,
+    past: [],
+    future: [],
+  });
 
-  function update(newState) {
-    setHistory((h) => {
-      const newHist = [...h, state];
-      return newHist.length > 10 ? newHist.slice(newHist.length - 10) : newHist;
-    });
-    setFuture([]);
-    setState(newState);
-  }
+  const update = useCallback((newState) => dispatch({ type: "update", payload: newState }), []);
+  const undo = useCallback(() => dispatch({ type: "undo" }), []);
+  const redo = useCallback(() => dispatch({ type: "redo" }), []);
 
-  function undo() {
-    setHistory((h) => {
-      if (!h.length) return h;
-      const prev = h[h.length - 1];
-      setFuture((f) => [state, ...f]);
-      setState(prev);
-      return h.slice(0, -1);
-    });
-  }
-
-  function redo() {
-    setFuture((f) => {
-      if (!f.length) return f;
-      const next = f[0];
-      setHistory((h) => [...h, state]);
-      setState(next);
-      return f.slice(1);
-    });
-  }
-
-  return [state, update, { undo, redo, canUndo: history.length > 0, canRedo: future.length > 0 }];
+  return [state.current, update, { undo, redo, canUndo: state.past.length > 0, canRedo: state.future.length > 0 }];
 }

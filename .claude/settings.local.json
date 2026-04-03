@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(./node_modules/.bin/vite build:*)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(echo \"exit=$?\")",
+      "Read(//tmp/**)",
+      "Bash(/c/Users/HP/Desktop/my-graph-app/node_modules/.bin/vite build:*)",
+      "Bash(node /c/Users/HP/Desktop/my-graph-app/node_modules/.bin/vite build)",
+      "Bash(node -e \"const vite = require\\(''./node_modules/vite''\\); vite.build\\({root: ''.''}\\).then\\(\\(\\)=>console.log\\(''ok''\\)\\).catch\\(e=>console.error\\(e\\)\\)\")",
+      "Bash(npm install:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

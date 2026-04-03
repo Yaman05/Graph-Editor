@@ -102,7 +102,7 @@ export default function GraphCanvas({
       .attr("text-anchor", "middle")
       .text((d) => d.label);
 
-
+    // Klick på bakgrunden → lägg till nod
     svg.on("click", (event) => {
       if (mode === "addNode") {
         const [x, y] = d3.pointer(event);
@@ -113,7 +113,7 @@ export default function GraphCanvas({
       }
     });
 
-    // Force layout if not hierarchical
+    // Force layout om ej hierarkiskt
     if (!hierarchical) {
       const simulation = d3
         .forceSimulation(nodes)
