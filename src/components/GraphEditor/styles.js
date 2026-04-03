@@ -1,15 +1,16 @@
-// Mission Control design system
+// src/components/GraphEditor/styles.js
+// Midnight Flow — n8n-inspired design system
 
 export const NODE_TYPE_COLORS = {
-  server:       "#4a8db7",   // steel blue
-  database:     "#5b5fcc",   // indigo
-  api:          "#2f9e7a",   // emerald
-  client:       "#c4893d",   // warm amber
-  loadbalancer: "#b0426a",   // rose / magenta
-  cache:        "#1e9db3",   // cyan
-  queue:        "#7c5cbf",   // violet
-  firewall:     "#c45c2a",   // orange-red
-  microservice: "#7ba82a",   // lime / chartreuse
+  server:       "#60a5fa",
+  database:     "#818cf8",
+  api:          "#5de4c7",
+  client:       "#ffd173",
+  loadbalancer: "#f0abfc",
+  cache:        "#22d3ee",
+  queue:        "#fb923c",
+  firewall:     "#f87171",
+  microservice: "#a3e635",
 };
 
 export const NODE_TYPES = [
@@ -34,28 +35,30 @@ export const FAILURE_COLORS = {
   affected: "#f59e0b",
 };
 
-// Design tokens
 export const DS = {
-  bg:           "#0a0e17",
-  bgPanel:      "#111827",
-  bgCard:       "#0f172a",
-  bgInput:      "#0d1424",
+  bg:           "#0a0a0f",
+  bgPanel:      "#111118",
+  bgCard:       "#17172a",
+  bgInput:      "#0d0d18",
   border:       "rgba(255,255,255,0.06)",
-  borderStrong: "rgba(255,255,255,0.10)",
-  accent:       "#06d6a0",
-  accentDim:    "rgba(6,214,160,0.12)",
-  accentGlow:   "rgba(6,214,160,0.28)",
+  borderStrong: "rgba(255,255,255,0.12)",
+  accent:       "#5de4c7",
+  accentDim:    "rgba(93,228,199,0.08)",
+  accentGlow:   "rgba(93,228,199,0.25)",
+  success:      "#5de4c7",
+  successDim:   "rgba(93,228,199,0.08)",
   danger:       "#ef4444",
-  dangerDim:    "rgba(239,68,68,0.12)",
+  dangerDim:    "rgba(239,68,68,0.08)",
   warning:      "#f59e0b",
-  warningDim:   "rgba(245,158,11,0.12)",
-  gold:         "#f59e0b",
-  textPrimary:  "#f1f5f9",
-  textSecond:   "#94a3b8",
-  textMuted:    "#475569",
+  warningDim:   "rgba(245,158,11,0.08)",
+  gold:         "#ffd173",
+  textPrimary:  "#e4e2ec",
+  textSecond:   "#7b7f9e",
+  textMuted:    "#3d4058",
 };
 
-export const MONO = "'JetBrains Mono', monospace";
+export const MONO    = "'JetBrains Mono', monospace";
+export const DISPLAY = "'Outfit', sans-serif";
 
 export const styles = {
   brandColor: DS.accent,
@@ -63,60 +66,61 @@ export const styles = {
   input: {
     display: "block",
     width: "100%",
-    padding: "6px 10px",
-    borderRadius: 2,
+    padding: "8px 11px",
+    borderRadius: 8,
     border: `1px solid ${DS.border}`,
     background: DS.bgInput,
     color: DS.textPrimary,
     boxSizing: "border-box",
-    fontSize: 11,
-    fontFamily: MONO,
-    letterSpacing: "0.02em",
+    fontSize: 12,
+    fontFamily: DISPLAY,
+    letterSpacing: "0.01em",
+    transition: "border-color 0.15s, box-shadow 0.15s",
+    outline: "none",
   },
 
   btn: {
-    background: "transparent",
+    background: DS.accentDim,
     color: DS.accent,
-    border: `1px solid ${DS.accent}`,
-    padding: "6px 10px",
-    borderRadius: 2,
+    border: `1px solid ${DS.accent}44`,
+    padding: "8px 12px",
+    borderRadius: 8,
     cursor: "pointer",
     fontWeight: 600,
     textAlign: "center",
     fontSize: 11,
-    fontFamily: MONO,
-    letterSpacing: "0.06em",
+    fontFamily: DISPLAY,
+    letterSpacing: "0.02em",
     width: "100%",
     boxSizing: "border-box",
-    transition: "background 0.12s",
+    transition: "all 0.15s",
   },
 
   btnSmall: {
-    background: "transparent",
+    background: DS.accentDim,
     color: DS.accent,
-    border: `1px solid ${DS.accent}`,
-    padding: "4px 8px",
-    borderRadius: 2,
+    border: `1px solid ${DS.accent}33`,
+    padding: "4px 10px",
+    borderRadius: 6,
     cursor: "pointer",
     fontWeight: 600,
-    fontSize: 10,
-    fontFamily: MONO,
-    letterSpacing: "0.06em",
+    fontSize: 11,
+    fontFamily: DISPLAY,
     boxSizing: "border-box",
   },
 
   btnDanger: {
-    background: "transparent",
+    background: DS.dangerDim,
     color: DS.danger,
-    border: `1px solid ${DS.danger}`,
-    padding: "6px 10px",
-    borderRadius: 2,
+    border: `1px solid ${DS.danger}33`,
+    padding: "8px 12px",
+    borderRadius: 8,
     cursor: "pointer",
     fontWeight: 600,
     textAlign: "center",
     fontSize: 11,
-    fontFamily: MONO,
-    letterSpacing: "0.06em",
+    fontFamily: DISPLAY,
+    letterSpacing: "0.02em",
     width: "100%",
     boxSizing: "border-box",
   },
@@ -125,12 +129,11 @@ export const styles = {
     background: "transparent",
     color: DS.textSecond,
     border: `1px solid ${DS.border}`,
-    padding: "6px 10px",
-    borderRadius: 2,
+    padding: "8px 12px",
+    borderRadius: 8,
     cursor: "pointer",
     fontSize: 11,
-    fontFamily: MONO,
-    letterSpacing: "0.04em",
+    fontFamily: DISPLAY,
     width: "100%",
     boxSizing: "border-box",
   },
@@ -138,22 +141,24 @@ export const styles = {
   modalBackdrop: {
     position: "fixed",
     inset: 0,
-    background: "rgba(10,14,23,0.88)",
+    background: "rgba(6,6,10,0.85)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 2000,
-    backdropFilter: "blur(12px)",
+    backdropFilter: "blur(24px)",
   },
 
   modal: {
-    width: 420,
-    maxWidth: "90vw",
+    position: "relative",
+    width: 440,
+    maxWidth: "92vw",
     background: DS.bgPanel,
-    padding: 24,
-    borderRadius: 4,
-    boxShadow: "0 32px 80px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.04)",
-    border: `1px solid ${DS.border}`,
-    animation: "fade-scale-in 150ms ease both",
+    padding: 28,
+    borderRadius: 16,
+    boxShadow: "0 40px 120px rgba(0,0,0,0.8), 0 0 0 1px rgba(93,228,199,0.08), inset 0 1px 0 rgba(255,255,255,0.04)",
+    border: `1px solid ${DS.borderStrong}`,
+    animation: "fade-scale-in 180ms ease both",
+    overflow: "hidden",
   },
 };

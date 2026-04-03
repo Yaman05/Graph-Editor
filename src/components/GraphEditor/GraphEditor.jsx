@@ -17,7 +17,7 @@ import {
   isConnected,
 } from "./utils/algorithms";
 import { computeHierarchyPositions, computeCircularPositions } from "./utils/layout";
-import { NODE_TYPE_COLORS, NODE_TYPES, FAILURE_COLORS, DS } from "./styles";
+import { NODE_TYPE_COLORS, NODE_TYPES, NODE_TYPE_LABELS, FAILURE_COLORS, DS } from "./styles";
 
 import Modal from "./Modal";
 import Sidebar from "./Sidebar";
@@ -94,6 +94,12 @@ export default function GraphEditor() {
 
   // Core graph state (with undo history, auto-restored from localStorage)
   const [data, updateData, historyCtrl] = useHistoryState(getInitialData());
+
+  // Lock body scroll while editor is mounted
+  useEffect(() => {
+    document.body.classList.add("editor-mode");
+    return () => document.body.classList.remove("editor-mode");
+  }, []);
 
   // Auto-save to localStorage on data changes (debounced)
   useEffect(() => {
@@ -215,46 +221,34 @@ export default function GraphEditor() {
 
     svg.selectAll("*").remove();
 
-    // Dot-grid background rect (rendered behind everything)
+    // Dot-grid background
     const defs = svg.append("defs");
 
     defs.append("pattern")
       .attr("id", "dot-grid")
-      .attr("x", 0).attr("y", 0)
-      .attr("width", 20).attr("height", 20)
+      .attr("width", 24).attr("height", 24)
       .attr("patternUnits", "userSpaceOnUse")
       .append("circle")
-        .attr("cx", 10).attr("cy", 10).attr("r", 0.8)
-        .attr("fill", "rgba(148,163,184,0.25)");
+        .attr("cx", 12).attr("cy", 12).attr("r", 0.5)
+        .attr("fill", "rgba(255,255,255,0.05)");
 
     svg.append("rect")
       .attr("width", "100%").attr("height", "100%")
       .attr("fill", "url(#dot-grid)");
 
-    // Arrowheads
-    defs.append("marker")
-      .attr("id", "arrowhead")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 24).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", DS.accent);
-
-    defs.append("marker")
-      .attr("id", "arrowhead-fail")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 24).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", FAILURE_COLORS.failed);
-
-    defs.append("marker")
-      .attr("id", "arrowhead-warn")
-      .attr("viewBox", "0 -5 10 10")
-      .attr("refX", 24).attr("refY", 0)
-      .attr("markerWidth", 6).attr("markerHeight", 6)
-      .attr("orient", "auto")
-      .append("path").attr("d", "M0,-5L10,0L0,5").attr("fill", DS.gold);
+    // Arrowheads (smaller, refined)
+    function makeArrow(id, color) {
+      defs.append("marker")
+        .attr("id", id)
+        .attr("viewBox", "0 -4 8 8")
+        .attr("refX", 8).attr("refY", 0)
+        .attr("markerWidth", 5).attr("markerHeight", 5)
+        .attr("orient", "auto")
+        .append("path").attr("d", "M0,-3.5L8,0L0,3.5").attr("fill", color);
+    }
+    makeArrow("arrowhead", DS.accent);
+    makeArrow("arrowhead-fail", FAILURE_COLORS.failed);
+    makeArrow("arrowhead-warn", DS.gold);
 
     const container = svg.append("g").attr("class", "container");
     svg.call(
@@ -285,9 +279,10 @@ export default function GraphEditor() {
     } else {
       usingSimulation = true;
       const sim = d3.forceSimulation(nodesCopy)
-        .force("link",   d3.forceLink(linksCopy).id((d) => d.id).distance(120))
-        .force("charge", d3.forceManyBody().strength(-320))
+        .force("link",   d3.forceLink(linksCopy).id((d) => d.id).distance(200))
+        .force("charge", d3.forceManyBody().strength(-600))
         .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collide", d3.forceCollide().radius(80))
         .on("tick", ticked);
       simRef.current = sim;
     }
@@ -297,6 +292,11 @@ export default function GraphEditor() {
 
     const linkQuery  = parseLinkQuery(search);
     const nodeSearch = search && !linkQuery ? search.toLowerCase() : null;
+
+    // ─ Card node dimensions ──────────────────────────────────────────────
+    const NODE_H = 44;
+    const NODE_R = 12;
+    function getNodeW(d) { return Math.max(120, 30 + ((d.label?.length || 0) * 7)); }
 
     // ─ Links ─────────────────────────────────────────────────────────────
     function getLinkArrow(d) {
@@ -322,7 +322,7 @@ export default function GraphEditor() {
           const et = typeof e.target === "object" ? e.target.id : e.target;
           return (es === src && et === tgt) || (es === tgt && et === src);
         });
-        return isMst ? DS.accent : "rgba(255,255,255,0.06)";
+        return isMst ? DS.accent : "rgba(255,255,255,0.04)";
       }
 
       if (failedNodes.has(src) || failedNodes.has(tgt)) return FAILURE_COLORS.failed;
@@ -340,12 +340,32 @@ export default function GraphEditor() {
       if (inPath)      return DS.gold;
       if (isSel)       return DS.accent;
       if (isSearched)  return DS.gold;
-      return "rgba(148,163,184,0.35)";
+      return "rgba(255,255,255,0.12)";
     }
 
-    const linkSel = linkGroup.selectAll("line").data(linksCopy).join("line")
+    // ─ Bezier path generator ─────────────────────────────────────────────
+    function nodeX(d, field) {
+      return typeof d[field] === "object" ? d[field].x : nodesCopy.find((n) => n.id === d[field])?.x ?? 0;
+    }
+    function nodeY(d, field) {
+      return typeof d[field] === "object" ? d[field].y : nodesCopy.find((n) => n.id === d[field])?.y ?? 0;
+    }
+
+    function makeLinkPath(d) {
+      const sx = nodeX(d, "source"), sy = nodeY(d, "source");
+      const tx = nodeX(d, "target"), ty = nodeY(d, "target");
+      const dx = tx - sx, dy = ty - sy;
+      const midX = (sx + tx) / 2, midY = (sy + ty) / 2;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        return `M ${sx},${sy} C ${midX},${sy} ${midX},${ty} ${tx},${ty}`;
+      }
+      return `M ${sx},${sy} C ${sx},${midY} ${tx},${midY} ${tx},${ty}`;
+    }
+
+    const linkSel = linkGroup.selectAll("path").data(linksCopy).join("path")
+      .attr("fill", "none")
       .attr("stroke-width", 1.5)
-      .attr("stroke-opacity", 0.85)
+      .attr("stroke-opacity", 0.65)
       .style("cursor", "pointer")
       .attr("stroke", getLinkColor)
       .attr("marker-end", getLinkArrow)
@@ -366,7 +386,7 @@ export default function GraphEditor() {
       .style("pointer-events", "none")
       .text((d) => d.weight == null ? "" : d.weight);
 
-    // ─ Nodes ─────────────────────────────────────────────────────────────
+    // ─ Node helpers ──────────────────────────────────────────────────────
     let colorScale = null;
     if (analysis?.values) {
       const vals = Object.values(analysis.values);
@@ -375,81 +395,85 @@ export default function GraphEditor() {
         .range([DS.bgCard, DS.accent]);
     }
 
-    function getNodeFill(d) {
-      if (failedNodes.has(d.id))   return FAILURE_COLORS.failed;
-      if (affectedNodes.has(d.id)) return FAILURE_COLORS.affected;
-
+    function getCardFill(d) {
+      if (failedNodes.has(d.id))   return `${FAILURE_COLORS.failed}18`;
+      if (affectedNodes.has(d.id)) return `${FAILURE_COLORS.affected}15`;
       if (algorithmResult?.type === "bfs" || algorithmResult?.type === "dfs") {
-        if (algorithmResult.visited.has(d.id)) {
-          const idx = algorithmResult.order.indexOf(d.id);
-          const t   = idx / Math.max(1, algorithmResult.order.length - 1);
-          return d3.interpolate(NODE_TYPE_COLORS[d.nodeType] || DS.bgCard, DS.accent)(t);
-        }
+        if (algorithmResult.visited.has(d.id)) return `${DS.accent}12`;
       }
-
-      if (algorithmResult?.type === "topological") {
-        const idx = algorithmResult.order.indexOf(d.id);
-        if (idx !== -1) {
-          const t = idx / Math.max(1, algorithmResult.order.length - 1);
-          return d3.interpolate("#7c5cbf", DS.gold)(t);
-        }
+      if (algorithmResult?.type === "topological" && algorithmResult.order.includes(d.id)) return `${DS.gold}10`;
+      if (analysis?.values && colorScale) {
+        const c = colorScale(analysis.values[d.id] ?? 0);
+        return c + "20";
       }
-
-      if (analysis?.values && colorScale) return colorScale(analysis.values[d.id] ?? 0);
-      if (shortestPath.includes(d.id))     return DS.gold;
-      if (selected.type === "node" && selected.id === d.id) return DS.accent;
-      if (nodeSearch && d.label.toLowerCase().includes(nodeSearch)) return DS.gold;
-
-      return NODE_TYPE_COLORS[d.nodeType] || DS.bgCard;
+      if (shortestPath.includes(d.id)) return `${DS.gold}15`;
+      if (selected.type === "node" && selected.id === d.id) return `${DS.accent}12`;
+      return DS.bgCard;
     }
 
     function getNodeStroke(d) {
       if (failedNodes.has(d.id))   return FAILURE_COLORS.failed;
       if (affectedNodes.has(d.id)) return FAILURE_COLORS.affected;
+      if (algorithmResult?.type === "bfs" || algorithmResult?.type === "dfs") {
+        if (algorithmResult.visited.has(d.id)) {
+          const idx = algorithmResult.order.indexOf(d.id);
+          const t = idx / Math.max(1, algorithmResult.order.length - 1);
+          return d3.interpolate(NODE_TYPE_COLORS[d.nodeType] || DS.bgCard, DS.accent)(t);
+        }
+      }
+      if (algorithmResult?.type === "topological" && algorithmResult.order.includes(d.id)) return DS.gold;
+      if (shortestPath.includes(d.id)) return DS.gold;
       if (selected.type === "node" && selected.id === d.id) return DS.accent;
-      if (d.subGraph?.nodes?.length > 0) return DS.accent;
-      return `${NODE_TYPE_COLORS[d.nodeType]}88` || "rgba(255,255,255,0.15)";
+      if (nodeSearch && d.label.toLowerCase().includes(nodeSearch)) return DS.gold;
+      if (d.subGraph?.nodes?.length > 0) return `${DS.accent}88`;
+      return `${NODE_TYPE_COLORS[d.nodeType] || "rgba(255,255,255,0.15)"}44`;
     }
 
-    function getNodeR(d) {
-      return Math.max(20, 16 + (d.label?.length || 0) * 1.2);
+    function getNodeFilter(d) {
+      if (failedNodes.has(d.id))   return `drop-shadow(0 0 12px ${FAILURE_COLORS.failed}88)`;
+      if (affectedNodes.has(d.id)) return `drop-shadow(0 0 10px ${FAILURE_COLORS.affected}66)`;
+      if (selected.type === "node" && selected.id === d.id) return `drop-shadow(0 0 14px ${DS.accent}44)`;
+      if (shortestPath.includes(d.id)) return `drop-shadow(0 0 10px ${DS.gold}55)`;
+      const c = NODE_TYPE_COLORS[d.nodeType];
+      return c ? `drop-shadow(0 0 6px ${c}22)` : "none";
     }
 
+    // ─ Nodes (card style) ────────────────────────────────────────────────
     const node = nodeGroup.selectAll("g").data(nodesCopy, (d) => d.id)
       .join((enter) => {
-        const g = enter.append("g");
-        g.append("circle");
-        g.append("text")
-          .attr("y", 4)
-          .attr("text-anchor", "middle")
-          .attr("fill", DS.textPrimary)
-          .style("pointer-events", "none")
-          .style("font-size", "10px")
+        const g = enter.append("g").style("cursor", "pointer");
+        g.append("rect").attr("class", "card").attr("height", NODE_H).attr("rx", NODE_R).attr("ry", NODE_R);
+        g.append("circle").attr("class", "dot").attr("r", 5);
+        g.append("text").attr("class", "label")
+          .style("font-size", "11px")
+          .style("font-family", "'Outfit', sans-serif")
+          .style("font-weight", "500")
+          .style("pointer-events", "none");
+        g.append("text").attr("class", "type-label")
+          .style("font-size", "8px")
           .style("font-family", "'JetBrains Mono', monospace")
-          .style("font-weight", "600");
+          .style("letter-spacing", "0.06em")
+          .style("text-transform", "uppercase")
+          .style("pointer-events", "none");
         return g;
       });
 
-    node.select("circle")
-      .attr("r",            getNodeR)
-      .attr("fill",         getNodeFill)
-      .attr("stroke",       getNodeStroke)
+    // Card background
+    node.select("rect.card")
+      .attr("width", (d) => getNodeW(d))
+      .attr("x", (d) => -getNodeW(d) / 2)
+      .attr("y", -NODE_H / 2)
+      .attr("fill", getCardFill)
+      .attr("stroke", getNodeStroke)
       .attr("stroke-width", (d) => {
-        if (failedNodes.has(d.id) || affectedNodes.has(d.id)) return 2.5;
-        if (selected.type === "node" && selected.id === d.id) return 2;
-        if (d.subGraph?.nodes?.length > 0) return 1.5;
+        if (failedNodes.has(d.id) || affectedNodes.has(d.id)) return 1.5;
+        if (selected.type === "node" && selected.id === d.id) return 1.5;
         return 1;
       })
       .attr("stroke-dasharray", (d) =>
         d.subGraph?.nodes?.length > 0 && !failedNodes.has(d.id) ? "5,3" : null
       )
-      .style("filter", (d) => {
-        const color = NODE_TYPE_COLORS[d.nodeType];
-        if (selected.type === "node" && selected.id === d.id) return `drop-shadow(0 0 8px ${DS.accent})`;
-        if (failedNodes.has(d.id))   return `drop-shadow(0 0 8px ${FAILURE_COLORS.failed})`;
-        if (affectedNodes.has(d.id)) return `drop-shadow(0 0 6px ${FAILURE_COLORS.affected})`;
-        return color ? `drop-shadow(0 0 3px ${color}55)` : null;
-      })
+      .style("filter", getNodeFilter)
       .style("cursor", failureMode ? "crosshair" : "pointer")
       .style("animation", (d) =>
         affectedNodes.has(d.id) ? "pulse-fail 2s ease-in-out infinite" : null
@@ -470,75 +494,85 @@ export default function GraphEditor() {
         e.stopPropagation();
         if (failureMode) return;
         setSelected({ type: "node", id: d.id });
-        const rect = svgRef.current.getBoundingClientRect();
-        setCtxMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top, nodeId: d.id });
-        // Hide tooltip when context menu opens
+        const svgRect = svgRef.current.getBoundingClientRect();
+        setCtxMenu({ x: e.clientX - svgRect.left, y: e.clientY - svgRect.top, nodeId: d.id });
         const tip = tooltipRef.current;
         if (tip) tip.style.opacity = "0";
       })
       .on("mouseover", function(e, d) {
         if (selected.id === d.id) return;
-        const r = getNodeR(d);
-        d3.select(this).transition().duration(120)
-          .attr("r", r * 1.08)
-          .style("filter", `drop-shadow(0 0 8px ${NODE_TYPE_COLORS[d.nodeType] || DS.accent})`);
-        // Show tooltip
+        const typeColor = NODE_TYPE_COLORS[d.nodeType] || DS.accent;
+        d3.select(this).transition().duration(150)
+          .style("filter", `drop-shadow(0 0 16px ${typeColor}44)`);
         const tip = tooltipRef.current;
         if (tip) {
           const degree = data.links.filter((l) => l.source === d.id || l.target === d.id).length;
           const subCount = d.subGraph?.nodes?.length || 0;
-          tip.innerHTML = `<strong>${d.label}</strong><br/>ID: ${d.id}<br/>Type: ${d.nodeType}<br/>Links: ${degree}${subCount ? `<br/>Sub-components: ${subCount}` : ""}`;
+          tip.innerHTML = `<strong style="color:${typeColor}">${d.label}</strong><br/><span style="opacity:0.6">ID: ${d.id}</span><br/><span style="opacity:0.6">Type: ${d.nodeType}</span><br/><span style="opacity:0.6">Links: ${degree}</span>${subCount ? `<br/><span style="opacity:0.6">Sub: ${subCount}</span>` : ""}`;
           tip.style.opacity = "1";
-          const rect = svgRef.current.getBoundingClientRect();
-          tip.style.left = `${e.clientX - rect.left + 14}px`;
-          tip.style.top = `${e.clientY - rect.top - 10}px`;
+          const svgRect = svgRef.current.getBoundingClientRect();
+          tip.style.left = `${e.clientX - svgRect.left + 16}px`;
+          tip.style.top = `${e.clientY - svgRect.top - 12}px`;
         }
       })
       .on("mousemove", function(e) {
         const tip = tooltipRef.current;
         if (tip) {
-          const rect = svgRef.current.getBoundingClientRect();
-          tip.style.left = `${e.clientX - rect.left + 14}px`;
-          tip.style.top = `${e.clientY - rect.top - 10}px`;
+          const svgRect = svgRef.current.getBoundingClientRect();
+          tip.style.left = `${e.clientX - svgRect.left + 16}px`;
+          tip.style.top = `${e.clientY - svgRect.top - 12}px`;
         }
       })
       .on("mouseout", function(_, d) {
         if (selected.id === d.id) return;
-        d3.select(this).transition().duration(120)
-          .attr("r", getNodeR(d))
-          .style("filter", (dd) => {
-            const color = NODE_TYPE_COLORS[dd.nodeType];
-            return color ? `drop-shadow(0 0 3px ${color}55)` : null;
-          });
+        d3.select(this).transition().duration(150)
+          .style("filter", getNodeFilter(d));
         const tip = tooltipRef.current;
         if (tip) tip.style.opacity = "0";
       })
       .call(
         d3.drag()
           .on("start", (e, d) => {
-            // Reheat simulation so links follow while dragging
             if (usingSimulation && simRef.current && !e.active) simRef.current.alphaTarget(0.3).restart();
             d.fx = d.x; d.fy = d.y;
           })
           .on("drag", (e, d) => {
             d.fx = e.x; d.fy = e.y;
-            ticked(); // Always update DOM immediately — eliminates cursor lag
+            ticked();
           })
           .on("end", (e, d) => {
             if (usingSimulation && simRef.current && !e.active) simRef.current.alphaTarget(0);
-            // Pin mode: keep node fixed where it was dropped
-            // Normal mode: release node back to simulation physics
             if (layoutType === "NORMAL" && !pinModeRef.current) { d.fx = null; d.fy = null; }
           })
       );
 
-    node.select("text").text((d) => d.label || d.id);
+    // Type indicator dot
+    node.select("circle.dot")
+      .attr("cx", (d) => -getNodeW(d) / 2 + 18)
+      .attr("cy", -4)
+      .attr("fill", (d) => NODE_TYPE_COLORS[d.nodeType] || DS.accent)
+      .style("filter", (d) => `drop-shadow(0 0 4px ${NODE_TYPE_COLORS[d.nodeType] || DS.accent}88)`);
+
+    // Label
+    node.select("text.label")
+      .attr("x", (d) => -getNodeW(d) / 2 + 30)
+      .attr("y", -2)
+      .attr("text-anchor", "start")
+      .attr("fill", DS.textPrimary)
+      .text((d) => d.label || d.id);
+
+    // Type sublabel
+    node.select("text.type-label")
+      .attr("x", (d) => -getNodeW(d) / 2 + 30)
+      .attr("y", 13)
+      .attr("text-anchor", "start")
+      .attr("fill", DS.textMuted)
+      .text((d) => NODE_TYPE_LABELS[d.nodeType] || d.nodeType);
 
     // Analysis value labels
     if (analysis?.values) {
       node.append("text")
-        .attr("y", -getNodeR(node.datum ? node.datum() : { label: "" }) - 6)
-        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
+        .each(function(d) { d3.select(this).attr("y", -(NODE_H / 2 + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", DS.textSecond)
         .style("font-size", "9px")
@@ -550,7 +584,7 @@ export default function GraphEditor() {
     // Algorithm order labels
     if (algorithmResult?.order) {
       node.append("text")
-        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
+        .each(function(d) { d3.select(this).attr("y", -(NODE_H / 2 + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", DS.gold)
         .style("font-size", "9px")
@@ -564,46 +598,32 @@ export default function GraphEditor() {
     if (failureMode) {
       node.filter((d) => failedNodes.has(d.id))
         .append("text")
-        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
+        .each(function(d) { d3.select(this).attr("y", -(NODE_H / 2 + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", FAILURE_COLORS.failed)
-        .style("font-size", "8px")
-        .style("font-weight", "700")
+        .style("font-size", "8px").style("font-weight", "700")
         .style("font-family", "'JetBrains Mono', monospace")
         .style("pointer-events", "none")
         .text("FAILED");
 
       node.filter((d) => affectedNodes.has(d.id))
         .append("text")
-        .each(function(d) { d3.select(this).attr("y", -(getNodeR(d) + 8)); })
+        .each(function(d) { d3.select(this).attr("y", -(NODE_H / 2 + 8)); })
         .attr("text-anchor", "middle")
         .attr("fill", FAILURE_COLORS.affected)
-        .style("font-size", "8px")
-        .style("font-weight", "700")
+        .style("font-size", "8px").style("font-weight", "700")
         .style("font-family", "'JetBrains Mono', monospace")
         .style("pointer-events", "none")
         .text("AFFECTED");
     }
 
+    // ─ Ticked ────────────────────────────────────────────────────────────
     function ticked() {
-      function nodeX(d, field) {
-        const ref = typeof d[field] === "object" ? d[field].x : nodesCopy.find((n) => n.id === d[field])?.x ?? 0;
-        return ref;
-      }
-      function nodeY(d, field) {
-        const ref = typeof d[field] === "object" ? d[field].y : nodesCopy.find((n) => n.id === d[field])?.y ?? 0;
-        return ref;
-      }
-
-      linkSel
-        .attr("x1", (d) => nodeX(d, "source"))
-        .attr("y1", (d) => nodeY(d, "source"))
-        .attr("x2", (d) => nodeX(d, "target"))
-        .attr("y2", (d) => nodeY(d, "target"));
+      linkSel.attr("d", makeLinkPath);
 
       weightLabels
         .attr("x", (d) => (nodeX(d, "source") + nodeX(d, "target")) / 2)
-        .attr("y", (d) => (nodeY(d, "source") + nodeY(d, "target")) / 2 - 7);
+        .attr("y", (d) => (nodeY(d, "source") + nodeY(d, "target")) / 2 - 10);
 
       node.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
     }
@@ -1123,16 +1143,17 @@ export default function GraphEditor() {
             opacity: 0,
             background: DS.bgPanel,
             border: `1px solid ${DS.border}`,
-            borderRadius: 4,
-            padding: "6px 10px",
+            borderRadius: 10,
+            padding: "8px 14px",
             fontSize: 11,
-            fontFamily: "'JetBrains Mono', monospace",
-            color: DS.text,
-            lineHeight: 1.5,
+            fontFamily: "'Outfit', sans-serif",
+            color: DS.textPrimary,
+            lineHeight: 1.6,
             zIndex: 50,
             transition: "opacity 0.15s ease",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-            maxWidth: 220,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+            backdropFilter: "blur(16px)",
+            maxWidth: 240,
             whiteSpace: "nowrap",
           }}
         />
@@ -1146,13 +1167,14 @@ export default function GraphEditor() {
               top: ctxMenu.y,
               background: DS.bgPanel,
               border: `1px solid ${DS.border}`,
-              borderRadius: 4,
-              padding: "4px 0",
+              borderRadius: 12,
+              padding: "6px 0",
               zIndex: 200,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
-              minWidth: 160,
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 11,
+              boxShadow: "0 12px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)",
+              backdropFilter: "blur(16px)",
+              minWidth: 180,
+              fontFamily: "'Outfit', sans-serif",
+              fontSize: 12,
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1170,10 +1192,11 @@ export default function GraphEditor() {
                   key={i}
                   onClick={item.action}
                   style={{
-                    padding: "6px 14px",
+                    padding: "7px 16px",
                     cursor: "pointer",
-                    color: item.danger ? "#ef4444" : DS.text,
-                    transition: "background 0.1s",
+                    color: item.danger ? DS.danger : DS.textSecond,
+                    fontWeight: 500,
+                    transition: "all 0.1s ease",
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.background = DS.bgCard; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}

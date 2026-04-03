@@ -1,11 +1,12 @@
+// src/components/GraphEditor/Toast.jsx
 import { useEffect } from "react";
-import { DS, MONO } from "./styles";
+import { DS, DISPLAY } from "./styles";
 
 const TYPE_STYLES = {
-  error:   { color: DS.danger,  bg: DS.dangerDim,  border: `${DS.danger}44` },
-  warning: { color: DS.warning, bg: DS.warningDim, border: `${DS.warning}44` },
-  success: { color: DS.accent,  bg: DS.accentDim,  border: `${DS.accent}44` },
-  info:    { color: DS.textSecond, bg: "rgba(255,255,255,0.06)", border: DS.border },
+  error:   { color: DS.danger,     bg: DS.dangerDim,  border: `${DS.danger}44`  },
+  warning: { color: DS.warning,    bg: DS.warningDim, border: `${DS.warning}44` },
+  success: { color: DS.success,    bg: DS.successDim, border: `${DS.success}44` },
+  info:    { color: DS.textSecond, bg: "rgba(255,255,255,0.04)", border: DS.border },
 };
 
 function ToastItem({ toast, onDismiss }) {
@@ -17,21 +18,27 @@ function ToastItem({ toast, onDismiss }) {
   }, [onDismiss]);
 
   return (
-    <div style={{
-      background: s.bg,
-      border: `1px solid ${s.border}`,
-      borderLeft: `3px solid ${s.color}`,
-      borderRadius: 2,
-      padding: "8px 14px",
-      color: s.color,
-      fontSize: 12,
-      fontFamily: MONO,
-      letterSpacing: "0.03em",
-      lineHeight: 1.5,
-      animation: "fade-scale-in 150ms ease both",
-      maxWidth: 340,
-      wordBreak: "break-word",
-    }}>
+    <div
+      onClick={onDismiss}
+      style={{
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        borderLeft: `3px solid ${s.color}`,
+        borderRadius: 10,
+        padding: "10px 16px",
+        color: s.color,
+        fontSize: 12,
+        fontFamily: DISPLAY,
+        fontWeight: 500,
+        lineHeight: 1.6,
+        animation: "toast-slide-in 200ms ease both",
+        maxWidth: 360,
+        wordBreak: "break-word",
+        cursor: "pointer",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)",
+        backdropFilter: "blur(16px)",
+      }}
+    >
       {toast.message}
     </div>
   );
@@ -43,8 +50,8 @@ export default function ToastContainer({ toasts, removeToast }) {
   return (
     <div style={{
       position: "absolute",
-      top: 14,
-      right: 14,
+      top: 16,
+      right: 16,
       zIndex: 500,
       display: "flex",
       flexDirection: "column",
@@ -52,7 +59,9 @@ export default function ToastContainer({ toasts, removeToast }) {
       pointerEvents: "none",
     }}>
       {toasts.map((t) => (
-        <ToastItem key={t.id} toast={t} onDismiss={() => removeToast(t.id)} />
+        <div key={t.id} style={{ pointerEvents: "auto" }}>
+          <ToastItem toast={t} onDismiss={() => removeToast(t.id)} />
+        </div>
       ))}
     </div>
   );

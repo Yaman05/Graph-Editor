@@ -18,7 +18,7 @@ export default class ErrorBoundary extends Component {
         justifyContent: "center",
         height: "100vh",
         background: DS.bg,
-        color: DS.text,
+        color: DS.textPrimary,
         fontFamily: MONO,
         gap: 16,
         padding: 32,

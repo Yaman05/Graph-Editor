@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { styles, DS, MONO, NODE_TYPE_COLORS, NODE_TYPES, NODE_TYPE_LABELS } from "./styles";
+import { styles, DS, MONO, DISPLAY, NODE_TYPE_COLORS, NODE_TYPES, NODE_TYPE_LABELS } from "./styles";
 import Modal from "./Modal";
 import { makeUniqueId } from "./utils/helpers";
 
@@ -180,6 +180,7 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
       background: DS.bgPanel,
       backdropFilter: "blur(12px)",
       borderLeft: `1px solid ${DS.border}`,
+      borderRadius: "16px 0 0 16px",
       boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), -12px 0 48px rgba(0,0,0,0.6)`,
       display: "flex",
       flexDirection: "column",
@@ -188,7 +189,7 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
     }}>
 
       {/* Left accent line */}
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 2, background: typeColor, opacity: 0.8 }} />
+      <div style={{ position: "absolute", left: 0, top: 16, bottom: 16, width: 2, borderRadius: 1, background: typeColor, opacity: 0.6 }} />
 
       {/* Header */}
       <div style={{
@@ -202,24 +203,26 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: typeColor, flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: 700, color: DS.textPrimary, fontFamily: MONO }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: DS.textPrimary, fontFamily: DISPLAY }}>
               {node.label}
             </span>
             <span style={{
-              fontSize: 11,
+              fontSize: 10,
               color: typeColor,
               background: `${typeColor}22`,
               border: `1px solid ${typeColor}44`,
-              borderRadius: 2,
-              padding: "1px 6px",
-              letterSpacing: "0.08em",
+              borderRadius: 6,
+              padding: "2px 8px",
+              letterSpacing: "0.06em",
               textTransform: "uppercase",
+              fontFamily: MONO,
+              fontWeight: 600,
             }}>
               {NODE_TYPE_LABELS[node.nodeType] || node.nodeType}
             </span>
           </div>
-          <div style={{ fontSize: 10, color: DS.textMuted, letterSpacing: "0.04em", fontFamily: MONO }}>
-            SUB-ARCHITECTURE · {subCount} COMPONENT{subCount !== 1 ? "S" : ""}
+          <div style={{ fontSize: 10, color: DS.textMuted, letterSpacing: "0.04em", fontFamily: DISPLAY, fontWeight: 500 }}>
+            Sub-architecture · {subCount} component{subCount !== 1 ? "s" : ""}
           </div>
         </div>
         <button
@@ -227,12 +230,14 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
           style={{
             background: "transparent",
             border: `1px solid ${DS.border}`,
-            borderRadius: 2,
+            borderRadius: 8,
             color: DS.textSecond,
             cursor: "pointer",
-            padding: "4px 8px",
+            padding: "4px 10px",
             fontSize: 12,
-            fontFamily: MONO,
+            fontFamily: DISPLAY,
+            fontWeight: 500,
+            transition: "all 0.15s ease",
           }}
         >
           ✕
@@ -293,11 +298,11 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
               <line x1="2"  y1="12" x2="8"  y2="12" />
               <line x1="16" y1="12" x2="22" y2="12" />
             </svg>
-            <span style={{ fontSize: 11, color: DS.textMuted, fontFamily: MONO, letterSpacing: "0.04em" }}>
-              NO COMPONENTS YET
+            <span style={{ fontSize: 12, color: DS.textMuted, fontFamily: DISPLAY, fontWeight: 600, letterSpacing: "0.02em" }}>
+              No components yet
             </span>
-            <span style={{ fontSize: 10, color: DS.textMuted, opacity: 0.6, fontFamily: MONO }}>
-              click + COMPONENT to model internals
+            <span style={{ fontSize: 11, color: DS.textMuted, opacity: 0.6, fontFamily: DISPLAY }}>
+              Click + Component to model internals
             </span>
           </div>
         )}
@@ -312,8 +317,8 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
           overflowY: "auto",
           flexShrink: 0,
         }}>
-          <div style={{ fontSize: 11, color: DS.textMuted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6, fontFamily: MONO }}>
-            COMPONENTS
+          <div style={{ fontSize: 11, color: DS.textMuted, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 6, fontFamily: DISPLAY, fontWeight: 600 }}>
+            Components
           </div>
           {subData.nodes.map((n) => (
             <div
@@ -324,7 +329,7 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
                 alignItems: "center",
                 gap: 8,
                 padding: "4px 6px",
-                borderRadius: 2,
+                borderRadius: 8,
                 cursor: "pointer",
                 background: subSel.id === n.id ? DS.accentDim : "transparent",
                 borderLeft: subSel.id === n.id ? `2px solid ${DS.accent}` : "2px solid transparent",
@@ -332,8 +337,8 @@ export default function DrilldownPanel({ node, onUpdate, onClose, addToast }) {
               }}
             >
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: NODE_TYPE_COLORS[n.nodeType] || DS.accent, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, color: DS.textPrimary, fontFamily: MONO, flex: 1 }}>{n.label}</span>
-              <span style={{ fontSize: 11, color: DS.textMuted, fontFamily: MONO }}>{n.id}</span>
+              <span style={{ fontSize: 12, color: DS.textPrimary, fontFamily: DISPLAY, fontWeight: 500, flex: 1 }}>{n.label}</span>
+              <span style={{ fontSize: 10, color: DS.textMuted, fontFamily: MONO }}>{n.id}</span>
             </div>
           ))}
         </div>
